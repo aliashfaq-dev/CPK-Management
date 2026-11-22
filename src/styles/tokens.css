@@ -1,0 +1,22 @@
+/* Design tokens. Change the theme here; components only use these variables. */
+:root {
+  --canvas: #f5f7fa;
+  --surface: #ffffff;
+  --subtle: #f9fafb;
+  --fg: #182230;
+  --muted: #667085;
+  --line: #e4e7ec;
+  --line-strong: #d0d5dd;
+
+  --accent: #1b2a7b;
+  --accent-soft: #eef0fb;
+
+  --success: #12b76a;
+  --success-strong: #027a48;
+  --warning: #f79009;
+  --warning-strong: #b54708;
+  --danger: #dc2626;
+  --danger-strong: #b91c1c;
+
+  --feed: #0b1220;
+}
