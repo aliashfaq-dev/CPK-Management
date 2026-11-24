@@ -1,20 +1,28 @@
 "use client";
 
-import { useState } from "react";
-import { faExpand, faGrip, faSquare, faXmark } from "@fortawesome/free-solid-svg-icons";
-import type { Camera, CameraStatus, Detection } from "@/types";
+import { useCallback, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
+import { faPlus, faVideoSlash, faXmark } from "@fortawesome/free-solid-svg-icons";
+import type { Camera, CameraStatus, Detection, WorkspaceTab } from "@/types";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { SearchInput } from "@/components/ui/SearchInput";
 import { Select } from "@/components/ui/Select";
-import { StatusBadge } from "@/components/ui/StatusBadge";
 import { Toggle } from "@/components/ui/Toggle";
 import { useEscape } from "@/hooks/useEscape";
-import { cn, formatDateTime } from "@/lib/utils";
-import { CameraFeed } from "./CameraFeed";
-import { CameraGrid } from "./CameraGrid";
-import { RecentDetectionsPanel } from "./RecentDetectionsPanel";
+import { matchesCamera, sortByCameraNumber } from "@/lib/cameras";
+const FullscreenCameraModal = dynamic(
+  () => import("./FullscreenCameraModal").then((module) => module.FullscreenCameraModal),
+  {
+    ssr: false,
+    loading: () => <div className="fixed inset-0 z-50 animate-pulse bg-feed" aria-label="Opening fullscreen camera" />,
+  },
+);
+import { CameraGrid, MAX_GRID_SIZE, fitGridSize } from "./CameraGrid";
+import { EmptyTabPicker } from "./EmptyTabPicker";
+import { WorkspaceTabs } from "./WorkspaceTabs";
 
-type ViewMode = "grid" | "single";
 type StatusFilter = "all" | CameraStatus;
 
 const STATUS_OPTIONS = [
@@ -24,128 +32,191 @@ const STATUS_OPTIONS = [
   { value: "offline", label: "Offline" },
 ];
 
-export function LiveCameraView({ cameras, detections }: { cameras: Camera[]; detections: Detection[] }) {
-  const [view, setView] = useState<ViewMode>("grid");
-  const [selectedId, setSelectedId] = useState(cameras[0]?.id ?? "");
+const DEFAULT_PER_SCREEN = MAX_GRID_SIZE;
+const MAX_TABS = 20;
+const HOME_ID = "home";
+const HOME_TAB: WorkspaceTab = { id: HOME_ID, title: "All cameras", cameraIds: [], pinned: true };
+
+interface LiveCameraViewProps {
+  cameras: Camera[];
+  detections: Detection[];
+}
+
+export function LiveCameraView({ cameras, detections }: LiveCameraViewProps) {
+  // No tabs on load: the toolbar drives one grid of all cameras. The tab bar appears once "+" opens a custom view.
+  const [tabs, setTabs] = useState<WorkspaceTab[]>([]);
+  const [activeId, setActiveId] = useState(HOME_ID);
+  const [perScreen, setPerScreen] = useState<number>(DEFAULT_PER_SCREEN);
+  const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [showOverlay, setShowOverlay] = useState(true);
   const [fullscreenId, setFullscreenId] = useState<string | null>(null);
+  const nextTabNumber = useRef(1);
 
-  useEscape(fullscreenId !== null, () => setFullscreenId(null));
+  const closeFullscreen = useCallback(() => setFullscreenId(null), []);
+  useEscape(fullscreenId !== null, closeFullscreen);
 
-  const visible = cameras.filter((c) => statusFilter === "all" || c.status === statusFilter);
-  const selected = cameras.find((c) => c.id === selectedId) ?? cameras[0];
-  const fullscreen = cameras.find((c) => c.id === fullscreenId);
-  const detectionsFor = (id: string) => detections.filter((d) => d.cameraId === id);
-  const sidebarDetections = (view === "single" && selected ? detectionsFor(selected.id) : detections).slice(0, 8);
+  const cameraById = useMemo(() => new Map(cameras.map((camera) => [camera.id, camera])), [cameras]);
+
+  const detectionsByCamera = useMemo(() => {
+    const map = new Map<string, Detection[]>();
+    for (const detection of detections) {
+      const list = map.get(detection.cameraId);
+      if (list) list.push(detection);
+      else map.set(detection.cameraId, [detection]);
+    }
+    return map;
+  }, [detections]);
+
+  const activeTab = tabs.find((tab) => tab.id === activeId);
+  const showTabs = tabs.length > 0;
+  const isEmptyTab = activeTab !== undefined && activeTab.cameraIds.length === 0;
+  const barTabs = useMemo(() => [HOME_TAB, ...tabs], [tabs]);
+
+  // The home view shows every camera; a custom tab shows only the cameras assigned to it.
+  const sourceCameras = useMemo(
+    () => (activeTab ? activeTab.cameraIds.flatMap((id) => cameraById.get(id) ?? []) : cameras),
+    [activeTab, cameraById, cameras],
+  );
+
+  // Toolbar search/status narrow the cameras of the open tab. Anything not in `visible` is unmounted, which stops its feed.
+  // Sorted by camera number so "Show: N" always displays CAM-01, CAM-02, ... in order.
+  const filtered = useMemo(
+    () => sortByCameraNumber(sourceCameras.filter((camera) => (statusFilter === "all" || camera.status === statusFilter) && matchesCamera(camera, query))),
+    [sourceCameras, statusFilter, query],
+  );
+
+  // Options run 1..N for the cameras in the active tab, capped at the largest grid. An empty tab still offers the cap (it limits the picker).
+  const maxPerScreen = isEmptyTab ? MAX_GRID_SIZE : Math.min(Math.max(filtered.length, 1), MAX_GRID_SIZE);
+  const perScreenOptions = useMemo(
+    () => Array.from({ length: maxPerScreen }, (_, i) => i + 1).map((n) => ({ value: String(n), label: `Show: ${n} ${n === 1 ? "camera" : "cameras"}` })),
+    [maxPerScreen],
+  );
+  // If the selection exceeds what this tab holds (e.g. Show: 6 then a 2-camera tab), clamp it down.
+  const effectivePerScreen = Math.min(perScreen, maxPerScreen);
+  const visible = useMemo(() => filtered.slice(0, effectivePerScreen), [filtered, effectivePerScreen]);
+  const fullscreen = fullscreenId ? cameraById.get(fullscreenId) : undefined;
+
+  const selectTab = useCallback((id: string) => setActiveId(id), []);
+
+  const addTab = useCallback(() => {
+    if (tabs.length >= MAX_TABS) return;
+    const id = `w${nextTabNumber.current++}`;
+    setTabs([...tabs, { id, title: "New View", cameraIds: [] }]);
+    setActiveId(id);
+  }, [tabs]);
+
+  const closeTab = useCallback(
+    (id: string) => {
+      const index = tabs.findIndex((tab) => tab.id === id);
+      if (index < 0) return;
+      const remaining = tabs.filter((tab) => tab.id !== id);
+      setTabs(remaining);
+      // Closing the last custom tab drops back to the plain grid and hides the tab bar.
+      if (id === activeId) setActiveId(remaining[Math.min(index, remaining.length - 1)]?.id ?? HOME_ID);
+    },
+    [tabs, activeId],
+  );
+
+  const assignCameras = useCallback(
+    (ids: string[]) => {
+      const first = cameraById.get(ids[0]);
+      const title = first ? (ids.length > 1 ? `${first.name} +${ids.length - 1}` : first.name) : "New View";
+      // The tab is renamed after the chosen camera/area ("Karsaz Junction", or "Karsaz Junction +2").
+      setTabs((current) => current.map((tab) => (tab.id === activeId ? { ...tab, cameraIds: ids, title } : tab)));
+      setQuery("");
+      setStatusFilter("all");
+    },
+    [activeId, cameraById],
+  );
+
+  const clearFilters = useCallback(() => {
+    setQuery("");
+    setStatusFilter("all");
+  }, []);
 
   return (
     <>
-      <Card className="mb-4 p-4">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div className="flex flex-wrap items-end gap-3">
-            <div role="group" aria-label="View mode" className="flex gap-1 rounded-md border border-line p-1">
-              {([["grid", "Grid", faGrip], ["single", "Single", faSquare]] as const).map(([mode, label, icon]) => (
-                <Button key={mode} size="sm" variant={view === mode ? "primary" : "ghost"} icon={icon} aria-pressed={view === mode} onClick={() => setView(mode)}>
-                  {label}
-                </Button>
-              ))}
+      {/* Fills the space under the 4rem header and the main padding, so the page itself never scrolls. */}
+      <div className="flex h-[calc(100dvh-6rem)] min-h-0 flex-col gap-3 md:h-[calc(100dvh-7rem)]">
+        <Card className="shrink-0">
+          <div className="flex flex-wrap items-center gap-3 p-3">
+            <SearchInput
+              value={query}
+              onChange={setQuery}
+              label="Filter this tab by area or camera name"
+              placeholder="Filter this tab: area or camera"
+              className="w-full sm:w-72"
+            />
+            <div className="w-40">
+              <Select aria-label="Status filter" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)} options={STATUS_OPTIONS} />
             </div>
             <div className="w-44">
-              <Select label="Status filter" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)} options={STATUS_OPTIONS} />
+              <Select
+                aria-label="Cameras per screen"
+                value={String(effectivePerScreen)}
+                onChange={(e) => setPerScreen(Number(e.target.value))}
+                options={perScreenOptions}
+              />
             </div>
-            {view === "single" && (
-              <div className="w-56">
-                <Select label="Camera" value={selected?.id} onChange={(e) => setSelectedId(e.target.value)} options={cameras.map((c) => ({ value: c.id, label: `${c.id} · ${c.name}` }))} />
+            <p className="text-xs text-muted" aria-live="polite">
+              {isEmptyTab ? "No cameras in this tab" : `${visible.length} of ${sourceCameras.length} cameras`}
+            </p>
+            <div className="ml-auto flex items-center gap-3">
+              {!showTabs && (
+                <Button icon={faPlus} onClick={addTab}>
+                  New view
+                </Button>
+              )}
+              <Toggle compact label="Detection overlay" checked={showOverlay} onChange={setShowOverlay} />
+            </div>
+          </div>
+        </Card>
+
+        <Card className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          {showTabs && <WorkspaceTabs tabs={barTabs} activeId={activeId} maxTabs={MAX_TABS} onSelect={selectTab} onClose={closeTab} onAdd={addTab} />}
+          <div
+            role={showTabs ? "tabpanel" : undefined}
+            id={showTabs ? `panel-${activeId}` : undefined}
+            aria-labelledby={showTabs ? `tab-${activeId}` : undefined}
+            className="min-h-0 flex-1 p-3"
+          >
+            {activeTab && isEmptyTab ? (
+              <EmptyTabPicker key={activeTab.id} cameras={cameras} limit={effectivePerScreen} onAssign={assignCameras} />
+            ) : visible.length === 0 ? (
+              <div className="h-full overflow-y-auto">
+                <EmptyState
+                  icon={faVideoSlash}
+                  title="No cameras match"
+                  description="Nothing in this view matches the current filter."
+                  action={
+                    <Button icon={faXmark} onClick={clearFilters}>
+                      Clear filters
+                    </Button>
+                  }
+                />
               </div>
+            ) : (
+              <CameraGrid
+                cameras={visible}
+                detectionsByCamera={detectionsByCamera}
+                size={fitGridSize(visible.length)}
+                showOverlay={showOverlay}
+                active={fullscreen === undefined}
+                onFullscreen={setFullscreenId}
+              />
             )}
           </div>
-          <div className="w-full lg:w-56">
-            <Toggle label="Detection overlay" checked={showOverlay} onChange={setShowOverlay} />
-          </div>
-        </div>
-      </Card>
-
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
-        <div className="min-w-0">
-          {view === "grid" ? (
-            <CameraGrid cameras={visible} detections={detections} selectedId={selected?.id ?? ""} showOverlay={showOverlay} onSelect={setSelectedId} onFullscreen={setFullscreenId} />
-          ) : (
-            selected && (
-              <div className="space-y-4">
-                <Card className="overflow-hidden">
-                  <CameraFeed camera={selected} detections={detectionsFor(selected.id)} showOverlay={showOverlay} />
-                  <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line p-4">
-                    <div>
-                      <p className="text-sm font-semibold">{selected.name}</p>
-                      <p className="text-xs text-muted">{selected.location}</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <StatusBadge status={selected.status} />
-                      <Button icon={faExpand} onClick={() => setFullscreenId(selected.id)}>
-                        Fullscreen
-                      </Button>
-                    </div>
-                  </div>
-                  <dl className="grid grid-cols-2 gap-4 border-t border-line p-4 text-sm sm:grid-cols-4">
-                    {[
-                      ["Resolution", selected.resolution],
-                      ["Frame rate", selected.fps ? `${selected.fps} fps` : "—"],
-                      ["Detections today", String(selected.detectionsToday)],
-                      ["Last activity", formatDateTime(selected.lastActivity)],
-                    ].map(([label, value]) => (
-                      <div key={label}>
-                        <dt className="text-xs text-muted">{label}</dt>
-                        <dd className="mt-0.5 font-medium">{value}</dd>
-                      </div>
-                    ))}
-                  </dl>
-                </Card>
-                <div className="flex gap-2 overflow-x-auto pb-1" role="group" aria-label="Switch camera">
-                  {visible.map((c) => (
-                    <button
-                      key={c.id}
-                      type="button"
-                      aria-pressed={c.id === selected.id}
-                      onClick={() => setSelectedId(c.id)}
-                      className={cn(
-                        "shrink-0 rounded-md border px-3 py-2 text-left text-xs transition-colors",
-                        c.id === selected.id ? "border-accent bg-accent-soft text-accent" : "border-line bg-surface text-muted hover:bg-subtle",
-                      )}
-                    >
-                      <span className="block font-medium">{c.id}</span>
-                      <span className="block">{c.name}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )
-          )}
-        </div>
-
-        <RecentDetectionsPanel
-          detections={sidebarDetections}
-          title={view === "single" && selected ? selected.name : "All cameras"}
-        />
+        </Card>
       </div>
 
       {fullscreen && (
-        <div className="fixed inset-0 z-50 flex flex-col bg-feed p-3 text-white sm:p-4" role="dialog" aria-modal="true" aria-label={`${fullscreen.name} fullscreen view`}>
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold">{fullscreen.name}</p>
-              <p className="truncate text-xs text-white/60">
-                {fullscreen.id} · {fullscreen.location} · {fullscreen.resolution}
-              </p>
-            </div>
-            <Button variant="secondary" icon={faXmark} onClick={() => setFullscreenId(null)}>
-              Exit fullscreen
-            </Button>
-          </div>
-          <div className="min-h-0 flex-1">
-            <CameraFeed camera={fullscreen} detections={detectionsFor(fullscreen.id)} showOverlay={showOverlay} fill />
-          </div>
-        </div>
+        <FullscreenCameraModal
+          camera={fullscreen}
+          detections={detectionsByCamera.get(fullscreen.id) ?? []}
+          showOverlay={showOverlay}
+          onClose={closeFullscreen}
+        />
       )}
     </>
   );

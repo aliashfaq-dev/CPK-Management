@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { Vehicle } from "@/types";
 import { PlateTag } from "@/components/detections/PlateTag";
 import { VehicleThumbnail } from "@/components/detections/VehicleThumbnail";
@@ -10,7 +11,7 @@ interface VehicleCardProps {
   onSelect: () => void;
 }
 
-export function VehicleCard({ vehicle, matches, selected, onSelect }: VehicleCardProps) {
+function VehicleCardComponent({ vehicle, matches, selected, onSelect }: VehicleCardProps) {
   return (
     <button
       type="button"
@@ -35,3 +36,5 @@ export function VehicleCard({ vehicle, matches, selected, onSelect }: VehicleCar
     </button>
   );
 }
+
+export const VehicleCard = memo(VehicleCardComponent);

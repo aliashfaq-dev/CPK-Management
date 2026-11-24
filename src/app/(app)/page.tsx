@@ -1,6 +1,5 @@
 import { faBullseye, faCalendarDay, faCarSide, faVideo } from "@fortawesome/free-solid-svg-icons";
-import { DashboardHero } from "@/components/dashboard/DashboardHero";
-import { ActivityChart } from "@/components/dashboard/ActivityChart";
+import { DeferredActivityChart } from "@/components/dashboard/DeferredActivityChart";
 import { CameraStatusPanel } from "@/components/dashboard/CameraStatus";
 import { DetectionOverview } from "@/components/dashboard/DetectionOverview";
 import { RecentDetections } from "@/components/dashboard/RecentDetections";
@@ -27,9 +26,6 @@ export default async function DashboardPage() {
 
   return (
     <>
-      <DashboardHero />
-      <AssistantChat className="mb-4" />
-
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Total vehicles detected" value={formatNumber(stats.totalVehicles)} icon={faCarSide} change={`${stats.totalChange}%`} trend="up" comparison="vs last month" />
         <StatCard label="Vehicles detected today" value={formatNumber(stats.todayVehicles)} icon={faCalendarDay} change={`${stats.todayChange}%`} trend="up" comparison="vs yesterday" />
@@ -37,9 +33,11 @@ export default async function DashboardPage() {
         <StatCard label="Detection accuracy" value={`${stats.accuracy}%`} icon={faBullseye} change={`${stats.accuracyChange} pts`} trend="up" comparison="vs last month" />
       </div>
 
+      <AssistantChat className="mt-4" />
+
       <div className="mt-4 grid gap-4 lg:grid-cols-3">
         <ChartCard className="lg:col-span-2" title="Detection activity" description="Vehicles detected per hour, last 24 hours">
-          <ActivityChart data={activity} />
+          <DeferredActivityChart data={activity} />
         </ChartCard>
         <DetectionOverview distribution={distribution} />
       </div>

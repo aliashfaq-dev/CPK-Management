@@ -44,7 +44,7 @@ export function Button({
   ...props
 }: ButtonProps) {
   return (
-    <button type={type} className={cn(buttonClasses(variant, size), className)} {...props}>
+    <button type={type} suppressHydrationWarning className={cn(buttonClasses(variant, size), className)} {...props}>
       {icon && <FontAwesomeIcon icon={icon} />}
       {children}
     </button>

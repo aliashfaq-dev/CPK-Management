@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { faMagnifyingGlass } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { cn } from "@/lib/utils";
@@ -9,9 +10,19 @@ interface SearchInputProps {
   placeholder?: string;
   label?: string;
   className?: string;
+  autoFocus?: boolean;
 }
 
-export function SearchInput({ value, onChange, placeholder = "Search", label = "Search", className }: SearchInputProps) {
+export function SearchInput({ value, onChange, placeholder = "Search", label = "Search", className, autoFocus }: SearchInputProps) {
+  const [draft, setDraft] = useState(value);
+
+  useEffect(() => setDraft(value), [value]);
+  useEffect(() => {
+    if (draft === value) return;
+    const timer = window.setTimeout(() => onChange(draft), 200);
+    return () => window.clearTimeout(timer);
+  }, [draft, value, onChange]);
+
   return (
     <div className={cn("relative", className)}>
       <FontAwesomeIcon
@@ -20,10 +31,12 @@ export function SearchInput({ value, onChange, placeholder = "Search", label = "
       />
       <input
         type="search"
+        autoFocus={autoFocus}
+        suppressHydrationWarning
         aria-label={label}
-        value={value}
+        value={draft}
         placeholder={placeholder}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={(event) => setDraft(event.target.value)}
         className={cn(fieldClass, "pl-9")}
       />
     </div>

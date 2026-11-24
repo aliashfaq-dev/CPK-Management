@@ -4,7 +4,7 @@ Instructions for AI coding agents working in this repository. Read this before c
 
 ## Project summary
 
-A frontend dashboard for an AI-powered vehicle tracking and detection platform. All data is dummy data today. Real AI recognition, live video streaming, and authentication are **not** implemented; never imply otherwise in the UI or copy.
+A frontend dashboard for an AI-powered vehicle tracking and detection platform. All data is dummy data today. Real AI recognition, live video streaming, and server-side authentication are **not** implemented; never imply otherwise in the UI or copy. Sign-in is a localStorage demo only (see "Demo authentication").
 
 ## Tech stack
 
@@ -31,13 +31,15 @@ Before finishing a task: run `npm run typecheck`, `npm run lint`, and `npm run b
 ```
 src/
 ├── app/                 Routes (App Router). Pages are thin server components.
-│   ├── layout.tsx       Root layout; loads user + notifications, wraps DashboardLayout
-│   ├── page.tsx         /            Dashboard
-│   ├── detections/      /detections
-│   ├── find-flag/       /find-flag
-│   ├── analytics/       /analytics
-│   ├── live-camera/     /live-camera
-│   └── settings/        /settings
+│   ├── layout.tsx       Root layout (html/body, seeds the demo user)
+│   ├── (auth)/login/    /login       Sign-in page (no dashboard chrome)
+│   └── (app)/           Route group: layout.tsx loads user + notifications and wraps AuthGuard → DashboardLayout
+│       ├── page.tsx     /            Dashboard
+│       ├── detections/  /detections
+│       ├── find-flag/   /find-flag
+│       ├── analytics/   /analytics
+│       ├── live-camera/ /live-camera
+│       └── settings/    /settings
 ├── components/
 │   ├── layout/          Sidebar, Header, MobileNavigation, DashboardLayout
 │   ├── ui/              Generic, reusable primitives (Button, Input, Modal, Tabs…)
@@ -122,5 +124,16 @@ src/
 
 ## Assistant chatbox
 
-- `src/components/ui/AssistantChat.tsx` is the large chat-style search box. It appears on `/`, `/detections`, and `/find-flag`. Reuse it; do not duplicate it.
+- `src/components/ui/AssistantChat.tsx` is the large chat-style search box. It appears on `/`, `/detections`, and `/find-flag`. Reuse it; do not duplicate it. The input sits at the top, with no suggestion chips, and supports picture/video attachments (previewed via `URL.createObjectURL`, revoked on remove, clear, and unmount; media is not analysed yet).
 - `src/lib/assistant.ts` is a rule-based parser over the dummy data (English and Roman Urdu). It is **not** an AI model. To connect Claude or Gemini, replace the body of `askAssistant` with a call to a server route and keep the `AssistantReply` shape. Never put API keys in client code.
+
+## Demo authentication
+
+- `src/lib/auth.ts` keeps a demo account in `localStorage` (`cpk_registered_user`, seeded on first load by `AuthBootstrap`) and the active session in `cpk_auth_session`. Demo login: `ayesha.khan@cpk.gov.pk` / `admin123`.
+- `src/hooks/useAuth.ts` reads the session with `useSyncExternalStore`; `AuthGuard` (in `(app)/layout.tsx`) redirects signed-out visitors to `/login`. The header's account menu has **Log out**, which clears the session.
+- This is client-side only and the password is stored in plain text: it protects nothing. Replace with real auth (server session, hashed passwords, middleware) before production.
+
+## Live Camera workspace
+
+- No tabs on load: the toolbar filters one grid of all cameras. "New view" (or "+") opens the Chrome-style tab bar (`WorkspaceTabs`): a pinned "All cameras" tab plus custom tabs that shrink equally with no horizontal scroll; each custom tab is closable and is renamed after its chosen camera/area. A blank tab shows `EmptyTabPicker` (search by camera number or address, then load).
+- Only the active tab's cameras are mounted, so feeds in other tabs, filtered-out cameras, and the page when hidden are stopped (`useLiveStream`).

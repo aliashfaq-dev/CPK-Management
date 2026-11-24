@@ -20,6 +20,7 @@ export function Input({ label, hint, error, id, className, ...props }: InputProp
       )}
       <input
         id={inputId}
+        suppressHydrationWarning
         aria-invalid={error ? true : undefined}
         className={cn(fieldClass, error && "border-danger", className)}
         {...props}

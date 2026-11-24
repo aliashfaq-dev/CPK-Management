@@ -11,7 +11,7 @@ export default async function FindFlagPage() {
   return (
     <>
       <PageHeader description="Locate a vehicle by plate, type, camera, or time range and review where it was detected." />
-      <AssistantChat className="mb-6" title="Describe the vehicle you want to flag" description="Tell the assistant what you remember: part of the plate, color, type, camera, or time." suggestions={["Black car KTN 5526", "Red motorcycle Karsaz", "White bus Airport Road", "Silver car on CAM-02"]} />
+      <AssistantChat className="mb-6" title="Describe the vehicle you want to flag" description="Tell the assistant what you remember: part of the plate, color, type, camera, or time." />
       <FindFlagView vehicles={vehicles} detections={detections} cameras={cameras} />
     </>
   );

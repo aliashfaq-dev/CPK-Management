@@ -1,11 +1,12 @@
 "use client";
 
+import { memo } from "react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { TimeSeriesPoint } from "@/types";
 import { ChartTooltip } from "@/components/ui/ChartTooltip";
 import { CHART_COLORS } from "@/lib/constants";
 
-export function ActivityChart({ data, height = 288 }: { data: TimeSeriesPoint[]; height?: number }) {
+function ActivityChartComponent({ data, height = 288 }: { data: TimeSeriesPoint[]; height?: number }) {
   const tick = { fill: CHART_COLORS.axis, fontSize: 12 };
   return (
     <div style={{ height }} className="w-full">
@@ -21,3 +22,5 @@ export function ActivityChart({ data, height = 288 }: { data: TimeSeriesPoint[];
     </div>
   );
 }
+
+export const ActivityChart = memo(ActivityChartComponent);

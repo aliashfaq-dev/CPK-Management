@@ -6,12 +6,13 @@ interface ToggleProps {
   onChange: (checked: boolean) => void;
   label: string;
   description?: string;
+  compact?: boolean;
 }
 
-export function Toggle({ checked, onChange, label, description }: ToggleProps) {
+export function Toggle({ checked, onChange, label, description, compact = false }: ToggleProps) {
   const labelId = useId();
   return (
-    <div className="flex items-start justify-between gap-4 py-3">
+    <div className={cn("flex justify-between gap-4", compact ? "items-center py-0" : "items-start py-3")}>
       <div>
         <p id={labelId} className="text-sm font-medium">
           {label}

@@ -1,3 +1,4 @@
+import { formatTime } from "@/lib/formatTime";
 import type {
   AnalyticsData,
   AppNotification,
@@ -133,12 +134,12 @@ export const notifications: AppNotification[] = [
   { id: "n1", title: "Camera offline", description: "CAM-05 Port Qasim Gate stopped reporting.", time: "7 hours ago", tone: "danger" },
   { id: "n2", title: "Weak signal", description: "CAM-03 Korangi Checkpoint is dropping frames.", time: "14 minutes ago", tone: "warning" },
   { id: "n3", title: "Low confidence detection", description: "DET-8994 was recorded at 82.4% confidence.", time: "1 hour ago", tone: "info" },
-  { id: "n4", title: "Daily report ready", description: "Yesterday's detection summary is available.", time: "Today, 06:00", tone: "info" },
+  { id: "n4", title: "Daily report ready", description: "Yesterday's detection summary is available.", time: "Today, 06:00 AM", tone: "info" },
 ];
 
 function hourlyCurve(rand: () => number): TimeSeriesPoint[] {
   return Array.from({ length: 24 }, (_, hour) => ({
-    label: `${String(hour).padStart(2, "0")}:00`,
+    label: formatTime(new Date(Date.UTC(2026, 0, 1, hour))),
     detections: Math.round(
       18 +
         92 * Math.exp(-((hour - 8.5) ** 2) / 8) +

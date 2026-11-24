@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -34,9 +35,6 @@ export function SidebarBrand({ collapsed = false }: { collapsed?: boolean }) {
           </div>
         )}
       </div>
-      {!collapsed && (
-        <p className="mt-3 rounded-md border border-line bg-subtle px-3 py-2 text-xs text-muted">Together for a Safer Karachi</p>
-      )}
     </div>
   );
 }
@@ -53,6 +51,7 @@ export function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: bool
             <li key={item.href}>
               <Link
                 href={item.href}
+                prefetch={true}
                 title={collapsed ? item.label : undefined}
                 aria-current={active ? "page" : undefined}
                 onClick={onNavigate}
@@ -85,7 +84,7 @@ interface SidebarProps {
   onToggle: () => void;
 }
 
-export function Sidebar({ collapsed, onToggle }: SidebarProps) {
+function SidebarComponent({ collapsed, onToggle }: SidebarProps) {
   return (
     <aside
       className={cn(
@@ -112,3 +111,5 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
     </aside>
   );
 }
+
+export const Sidebar = memo(SidebarComponent);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ChangeEvent, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { faImage, faMagnifyingGlass, faRotateLeft, faUpload, faXmark } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import type { Camera, Detection, Vehicle } from "@/types";
@@ -11,8 +11,9 @@ import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
+import { Pagination } from "@/components/ui/Pagination";
 import { StatusBadge } from "@/components/ui/StatusBadge";
-import { VEHICLE_TYPES } from "@/lib/constants";
+import { PAGE_SIZE, VEHICLE_TYPES } from "@/lib/constants";
 import { formatDateTime } from "@/lib/utils";
 import { DetectionTimeline } from "./DetectionTimeline";
 import { VehicleCard } from "./VehicleCard";
@@ -37,6 +38,13 @@ function runSearch(criteria: Criteria, hasImage: boolean, vehicles: Vehicle[], d
   const from = criteria.from ? Date.parse(`${criteria.from}:00Z`) : null;
   const to = criteria.to ? Date.parse(`${criteria.to}:59Z`) : null;
 
+  const sightingsByPlate = new Map<string, Detection[]>();
+  for (const detection of detections) {
+    const existing = sightingsByPlate.get(detection.plate);
+    if (existing) existing.push(detection);
+    else sightingsByPlate.set(detection.plate, [detection]);
+  }
+
   const matches = vehicles
     .filter(
       (vehicle) =>
@@ -45,7 +53,7 @@ function runSearch(criteria: Criteria, hasImage: boolean, vehicles: Vehicle[], d
     )
     .map((vehicle) => ({
       vehicle,
-      sightings: detections.filter((d) => {
+      sightings: (sightingsByPlate.get(vehicle.plate) ?? []).filter((d) => {
         const time = Date.parse(d.detectedAt);
         return (
           d.plate === vehicle.plate &&
@@ -68,6 +76,16 @@ export function FindFlagView({ vehicles, detections, cameras }: { vehicles: Vehi
   const [image, setImage] = useState<{ url: string; name: string } | null>(null);
   const [results, setResults] = useState<Match[] | null>(null);
   const [selectedPlate, setSelectedPlate] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+
+  // Revoke the preview URL when the page unmounts (replace/clear are handled below).
+  const imageUrlRef = useRef<string | null>(null);
+  useEffect(() => {
+    imageUrlRef.current = image?.url ?? null;
+  }, [image]);
+  useEffect(() => () => {
+    if (imageUrlRef.current) URL.revokeObjectURL(imageUrlRef.current);
+  }, []);
 
   const update = (patch: Partial<Criteria>) => setCriteria((current) => ({ ...current, ...patch }));
 
@@ -86,6 +104,7 @@ export function FindFlagView({ vehicles, detections, cameras }: { vehicles: Vehi
     event.preventDefault();
     const found = runSearch(criteria, image !== null, vehicles, detections);
     setResults(found);
+    setPage(1);
     setSelectedPlate(found[0]?.vehicle.plate ?? null);
   };
 
@@ -93,15 +112,22 @@ export function FindFlagView({ vehicles, detections, cameras }: { vehicles: Vehi
     setCriteria(EMPTY);
     clearImage();
     setResults(null);
+    setPage(1);
     setSelectedPlate(null);
   };
 
-  const selected = results?.find((match) => match.vehicle.plate === selectedPlate) ?? results?.[0];
-  const cameraSummary = selected
-    ? Array.from(
-        selected.sightings.reduce((map, d) => map.set(d.cameraId, (map.get(d.cameraId) ?? 0) + 1), new Map<string, number>()),
-      ).map(([id, count]) => ({ camera: cameras.find((c) => c.id === id), count }))
-    : [];
+  const matchByPlate = useMemo(
+    () => new Map((results ?? []).map((match) => [match.vehicle.plate, match])),
+    [results],
+  );
+  const selected = (selectedPlate ? matchByPlate.get(selectedPlate) : undefined) ?? results?.[0];
+  const cameraSummary = useMemo(() => {
+    if (!selected) return [];
+    const cameraById = new Map(cameras.map((camera) => [camera.id, camera]));
+    const counts = new Map<string, number>();
+    for (const detection of selected.sightings) counts.set(detection.cameraId, (counts.get(detection.cameraId) ?? 0) + 1);
+    return Array.from(counts, ([id, count]) => ({ camera: cameraById.get(id), count }));
+  }, [selected, cameras]);
 
   return (
     <>
@@ -171,7 +197,7 @@ export function FindFlagView({ vehicles, detections, cameras }: { vehicles: Vehi
             <h2 className="text-sm font-semibold">
               {results.length} vehicle{results.length === 1 ? "" : "s"} found
             </h2>
-            {results.map((match) => (
+            {results.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((match) => (
               <VehicleCard
                 key={match.vehicle.plate}
                 vehicle={match.vehicle}
@@ -180,6 +206,7 @@ export function FindFlagView({ vehicles, detections, cameras }: { vehicles: Vehi
                 onSelect={() => setSelectedPlate(match.vehicle.plate)}
               />
             ))}
+            {results.length > PAGE_SIZE && <Pagination page={page} pageSize={PAGE_SIZE} total={results.length} onPageChange={setPage} />}
           </section>
 
           {selected && (

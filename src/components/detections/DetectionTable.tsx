@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import { faEye, faSort, faSortDown, faSortUp } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import type { Detection, DetectionSortKey, SortDirection } from "@/types";
@@ -45,7 +46,7 @@ const COMPACT_HEADERS: Header[] = [
   { label: "Confidence" },
 ];
 
-export function DetectionTable({ detections, variant = "full", sortKey, sortDirection, onSort, onSelect }: DetectionTableProps) {
+function DetectionTableComponent({ detections, variant = "full", sortKey, sortDirection, onSort, onSelect }: DetectionTableProps) {
   const full = variant === "full";
   const headers = full ? FULL_HEADERS : COMPACT_HEADERS;
 
@@ -112,3 +113,5 @@ export function DetectionTable({ detections, variant = "full", sortKey, sortDire
     </div>
   );
 }
+
+export const DetectionTable = memo(DetectionTableComponent);

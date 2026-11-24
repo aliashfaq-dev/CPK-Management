@@ -41,6 +41,8 @@ export interface Camera {
   resolution: string;
   fps: number;
   detectionsToday: number;
+  /** Optional progressive video URL (mp4/webm). Leave undefined while feeds are placeholders. */
+  streamUrl?: string;
 }
 
 export interface User {
@@ -117,4 +119,28 @@ export interface AppSettings {
   detectionAlerts: boolean;
   profileName: string;
   profileEmail: string;
+}
+
+/** Demo-only account kept in localStorage. Not real authentication. */
+export interface RegisteredUser {
+  email: string;
+  password: string;
+  name: string;
+  role: string;
+}
+
+export interface AuthSession {
+  email: string;
+  name: string;
+  role: string;
+  signedInAt: string;
+}
+
+/** One Chrome-style workspace tab on the Live Camera page. An empty `cameraIds` means a blank "New View". */
+export interface WorkspaceTab {
+  id: string;
+  title: string;
+  cameraIds: string[];
+  /** Pinned tabs (the "All cameras" home tab) cannot be closed. */
+  pinned?: boolean;
 }

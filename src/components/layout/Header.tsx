@@ -2,22 +2,23 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState, type FormEvent } from "react";
+import { memo, useCallback, useEffect } from "react";
 import {
   faBars,
   faBell,
-  faCalendarDays,
   faChevronDown,
   faChevronRight,
+  faRightFromBracket,
 } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { NAV_ITEMS } from "@/data/navigation";
 import type { AppNotification, User } from "@/types";
 import { Button } from "@/components/ui/Button";
 import { Popover } from "@/components/ui/Popover";
-import { SearchInput } from "@/components/ui/SearchInput";
+import { signOut } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { isActivePath } from "./Sidebar";
+import { NavbarClock } from "./NavbarClock";
 
 interface HeaderProps {
   user: User;
@@ -31,32 +32,20 @@ const toneDot: Record<AppNotification["tone"], string> = {
   danger: "bg-danger",
 };
 
-const dateFormat = new Intl.DateTimeFormat("en-GB", {
-  weekday: "short",
-  day: "2-digit",
-  month: "short",
-  hour: "2-digit",
-  minute: "2-digit",
-});
 
-export function Header({ user, notifications, onMenuClick }: HeaderProps) {
+function HeaderComponent({ user, notifications, onMenuClick }: HeaderProps) {
   const pathname = usePathname();
   const router = useRouter();
   const current = NAV_ITEMS.find((item) => isActivePath(pathname, item.href));
-  const [query, setQuery] = useState("");
-  const [now, setNow] = useState<Date | null>(null);
-
   useEffect(() => {
-    setNow(new Date());
-    const timer = setInterval(() => setNow(new Date()), 30_000);
-    return () => clearInterval(timer);
-  }, []);
+    router.prefetch("/login");
+  }, [router]);
 
-  const onSearch = (event: FormEvent) => {
-    event.preventDefault();
-    const trimmed = query.trim();
-    router.push(trimmed ? `/detections?q=${encodeURIComponent(trimmed)}` : "/detections");
-  };
+  // Clears the session and leaves immediately. Clearing the session makes AuthGuard show <CpkLoader text="Signing out..." /> right away.
+  const onLogout = useCallback(() => {
+    signOut();
+    router.replace("/login");
+  }, [router]);
 
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-line bg-surface px-4 md:px-6">
@@ -86,16 +75,7 @@ export function Header({ user, notifications, onMenuClick }: HeaderProps) {
       </div>
 
       <div className="ml-auto flex items-center gap-2">
-        <form onSubmit={onSearch} role="search" className="hidden w-64 md:block">
-          <SearchInput value={query} onChange={setQuery} placeholder="Search plates…" label="Search license plates" />
-        </form>
-
-        {now && (
-          <div className="hidden items-center gap-2 px-2 text-xs text-muted xl:flex">
-            <FontAwesomeIcon icon={faCalendarDays} />
-            <time dateTime={now.toISOString()}>{dateFormat.format(now)}</time>
-          </div>
-        )}
+        <NavbarClock />
 
         <Popover
           label="Notifications"
@@ -164,6 +144,19 @@ export function Header({ user, notifications, onMenuClick }: HeaderProps) {
                   </li>
                 ))}
               </ul>
+              <div className="border-t border-line p-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    close();
+                    onLogout();
+                  }}
+                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium text-danger-strong hover:bg-subtle"
+                >
+                  <FontAwesomeIcon icon={faRightFromBracket} className="w-4" />
+                  Log out
+                </button>
+              </div>
             </div>
           )}
         </Popover>
@@ -171,3 +164,5 @@ export function Header({ user, notifications, onMenuClick }: HeaderProps) {
     </header>
   );
 }
+
+export const Header = memo(HeaderComponent);
