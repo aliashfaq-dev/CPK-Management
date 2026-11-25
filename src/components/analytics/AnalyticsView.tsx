@@ -10,7 +10,6 @@ import { ChartTooltip } from "@/components/ui/ChartTooltip";
 import { DateRangeFilter } from "@/components/ui/DateRangeFilter";
 import { LoadingState } from "@/components/ui/LoadingState";
 import { CHART_COLORS, VEHICLE_TYPE_COLORS, VEHICLE_TYPE_ICONS } from "@/lib/constants";
-import { getAnalytics } from "@/lib/data-service";
 import { formatNumber } from "@/lib/utils";
 
 const RANGE_DAYS: Record<Exclude<DateRangeKey, "custom">, number> = { today: 1, "7d": 7, "30d": 30 };
@@ -42,25 +41,22 @@ function ChartBox({ children }: { children: ReactElement }) {
   );
 }
 
-export function AnalyticsView() {
+export function AnalyticsView({ initialData }: { initialData: AnalyticsData }) {
   const [range, setRange] = useState<DateRangeKey>("7d");
   const [from, setFrom] = useState("2026-11-10");
   const [to, setTo] = useState("2026-11-22");
-  const [result, setResult] = useState<{ days: number; data: AnalyticsData } | null>(null);
+  const [result, setResult] = useState<{ days: number; data: AnalyticsData }>({ days: 90, data: initialData });
 
   const days = range === "custom" ? daysBetween(from, to) : RANGE_DAYS[range];
 
   useEffect(() => {
-    let cancelled = false;
-    getAnalytics(days).then((data) => {
-      if (!cancelled) setResult({ days, data });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [days]);
+    setResult({ days: 90, data: initialData });
+  }, [initialData]);
 
-  const data = result?.days === days ? result.data : null;
+  const data = result.data ? {
+    ...result.data,
+    trend: days === 1 ? result.data.hourly : result.data.trend.slice(-days),
+  } : null;
 
   const filter = (
     <div className="mb-6">
@@ -78,9 +74,9 @@ export function AnalyticsView() {
   }
 
   const total = data.trend.reduce((sum, point) => sum + point.detections, 0);
-  const peak = data.hourly.reduce((best, point) => (point.detections > best.detections ? point : best));
-  const topType = data.distribution.reduce((best, item) => (item.value > best.value ? item : best));
-  const avgAccuracy = data.cameraPerformance.reduce((sum, c) => sum + c.accuracy, 0) / data.cameraPerformance.length;
+  const peak = data.hourly.reduce((best, point) => (point.detections > best.detections ? point : best), { label: "—", detections: 0 });
+  const topType = data.distribution.reduce((best, item) => (item.value > best.value ? item : best), { name: "Car" as VehicleType, value: 0 });
+  const avgAccuracy = data.cameraPerformance.length ? data.cameraPerformance.reduce((sum, c) => sum + c.accuracy, 0) / data.cameraPerformance.length : 0;
   const distributionTotal = data.distribution.reduce((sum, item) => sum + item.value, 0);
   const activeCameras = [...data.cameraPerformance].sort((a, b) => b.detections - a.detections).slice(0, 5);
 
@@ -91,7 +87,7 @@ export function AnalyticsView() {
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Metric label="Total detections" value={formatNumber(total)} note={days === 1 ? "Last 24 hours" : `Last ${days} days`} />
         <Metric label="Peak hour" value={peak.label} note={`${peak.detections} detections on average`} />
-        <Metric label="Top vehicle type" value={topType.name} note={`${Math.round((topType.value / distributionTotal) * 100)}% of detections`} />
+        <Metric label="Top vehicle type" value={topType.name} note={`${distributionTotal ? Math.round((topType.value / distributionTotal) * 100) : 0}% of detections`} />
         <Metric label="Average accuracy" value={`${avgAccuracy.toFixed(1)}%`} note="Across all cameras" />
       </div>
 
@@ -126,7 +122,7 @@ export function AnalyticsView() {
               <li key={item.name} className="flex items-center gap-2">
                 <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: VEHICLE_TYPE_COLORS[item.name] }} aria-hidden="true" />
                 <span className="text-muted">{item.name}</span>
-                <span className="ml-auto font-medium tabular-nums">{Math.round((item.value / distributionTotal) * 100)}%</span>
+                <span className="ml-auto font-medium tabular-nums">{distributionTotal ? Math.round((item.value / distributionTotal) * 100) : 0}%</span>
               </li>
             ))}
           </ul>
@@ -180,7 +176,7 @@ export function AnalyticsView() {
           <BarList
             items={[...data.distribution]
               .sort((a, b) => b.value - a.value)
-              .map((item) => ({ label: item.name, value: item.value, icon: VEHICLE_TYPE_ICONS[item.name], hint: `${Math.round((item.value / distributionTotal) * 100)}%` }))}
+              .map((item) => ({ label: item.name, value: item.value, icon: VEHICLE_TYPE_ICONS[item.name], hint: `${distributionTotal ? Math.round((item.value / distributionTotal) * 100) : 0}%` }))}
           />
         </ChartCard>
       </div>

@@ -74,7 +74,13 @@ function DetectionTableComponent({ detections, variant = "full", sortKey, sortDi
           </tr>
         </thead>
         <tbody className="divide-y divide-line">
-          {detections.map((d) => (
+          {detections.length === 0 ? (
+            <tr>
+              <td colSpan={headers.length} className="px-4 py-10 text-center text-sm text-muted">
+                No detection records in the database yet. New detections will appear automatically.
+              </td>
+            </tr>
+          ) : detections.map((d) => (
             <tr
               key={d.id}
               onClick={onSelect ? () => onSelect(d) : undefined}

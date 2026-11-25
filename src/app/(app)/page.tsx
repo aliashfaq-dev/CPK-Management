@@ -10,18 +10,22 @@ import {
   getActivitySeries,
   getCameras,
   getDistribution,
+  getDetections,
   getRecentDetections,
   getStatistics,
 } from "@/lib/data-service";
 import { formatNumber } from "@/lib/utils";
 
+export const dynamic = "force-dynamic";
+
 export default async function DashboardPage() {
-  const [stats, activity, distribution, recent, cameras] = await Promise.all([
+  const [stats, activity, distribution, recent, cameras, allDetections] = await Promise.all([
     getStatistics(),
     getActivitySeries(),
     getDistribution(),
     getRecentDetections(6),
     getCameras(),
+    getDetections(),
   ]);
 
   return (
@@ -33,7 +37,7 @@ export default async function DashboardPage() {
         <StatCard label="Detection accuracy" value={`${stats.accuracy}%`} icon={faBullseye} change={`${stats.accuracyChange} pts`} trend="up" comparison="vs last month" />
       </div>
 
-      <AssistantChat className="mt-4" />
+      <AssistantChat className="mt-4" detections={allDetections} cameras={cameras} />
 
       <div className="mt-4 grid gap-4 lg:grid-cols-3">
         <ChartCard className="lg:col-span-2" title="Detection activity" description="Vehicles detected per hour, last 24 hours">

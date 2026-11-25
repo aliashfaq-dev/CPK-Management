@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import type { AnalyticsData } from "@/types";
 
 const AnalyticsView = dynamic(
   () => import("@/components/analytics/AnalyticsView").then((module) => module.AnalyticsView),
@@ -10,6 +11,6 @@ const AnalyticsView = dynamic(
   },
 );
 
-export function DeferredAnalyticsView() {
-  return <AnalyticsView />;
+export function DeferredAnalyticsView({ initialData }: { initialData: AnalyticsData }) {
+  return <AnalyticsView initialData={initialData} />;
 }

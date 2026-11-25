@@ -12,7 +12,7 @@ export function DetectionOverview({ distribution }: { distribution: Distribution
           label: item.name === "Bus" ? "Buses" : item.name === "Truck" ? "Trucks" : item.name === "Car" ? "Cars" : "Motorcycles",
           value: item.value,
           icon: VEHICLE_TYPE_ICONS[item.name],
-          hint: `${Math.round((item.value / total) * 100)}%`,
+          hint: `${total ? Math.round((item.value / total) * 100) : 0}%`,
         }))}
       />
     </ChartCard>

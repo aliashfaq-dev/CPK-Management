@@ -26,7 +26,6 @@ import { ConfidenceCell } from "@/components/detections/ConfidenceCell";
 import { PlateTag } from "@/components/detections/PlateTag";
 import { VehicleThumbnail } from "@/components/detections/VehicleThumbnail";
 import { askAssistant } from "@/lib/assistant";
-import { getCameras, getDetections } from "@/lib/data-service";
 import { cn, formatDateTime } from "@/lib/utils";
 import { Button } from "./Button";
 import { Card } from "./Card";
@@ -49,6 +48,8 @@ interface Message {
 }
 
 interface AssistantChatProps {
+  detections: Detection[];
+  cameras: Camera[];
   title?: string;
   description?: string;
   className?: string;
@@ -147,6 +148,8 @@ export function AssistantChat({
   title = "Ask the CPK assistant",
   description = "Describe what you are looking for in English or Roman Urdu: a plate, vehicle type, color, camera, or time. You can also attach pictures or videos.",
   className,
+  detections,
+  cameras,
 }: AssistantChatProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -158,7 +161,6 @@ export function AssistantChat({
   const fileRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const urlsRef = useRef<Set<string>>(new Set());
-  const dataRef = useRef<Promise<[Detection[], Camera[]]> | null>(null);
 
   // Release every object URL still held when the chat unmounts.
   useEffect(() => {
@@ -258,20 +260,17 @@ export function AssistantChat({
           {
             id: nextId.current++,
             role: "assistant",
-            text: `${mediaNote} Add a plate number, vehicle type, color, camera, or time to search the sample data.`,
+            text: `${mediaNote} Add a plate number, vehicle type, color, camera, or time to search the database records.`,
           },
         ]);
         return;
       }
-      dataRef.current ??= Promise.all([getDetections(), getCameras()]);
-      const [detections, cameras] = await dataRef.current;
       const reply = await askAssistant(query, detections, cameras);
       setMessages((current) => [
         ...current,
         { id: nextId.current++, role: "assistant", ...reply, text: mediaNote ? `${reply.text} ${mediaNote}` : reply.text },
       ]);
     } catch {
-      dataRef.current = null;
       setMessages((current) => [
         ...current,
         { id: nextId.current++, role: "assistant", text: "The search failed. Check your connection and send the question again." },
@@ -353,7 +352,7 @@ export function AssistantChat({
           </div>
         </div>
         <p className={cn("mt-2 text-xs", attachError ? "text-danger-strong" : "text-muted")} role={attachError ? "alert" : undefined}>
-          {attachError ?? "Enter to search, Shift+Enter for a new line. Searches sample data only; pictures and videos are not analysed yet."}
+          {attachError ?? "Enter to search, Shift+Enter for a new line. Searches the latest database records; pictures and videos are not analysed yet."}
         </p>
       </form>
 

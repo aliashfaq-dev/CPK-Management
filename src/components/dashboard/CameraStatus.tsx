@@ -17,7 +17,9 @@ export function CameraStatusPanel({ cameras }: { cameras: Camera[] }) {
       }
     >
       <ul className="divide-y divide-line">
-        {cameras.map((camera) => (
+        {cameras.length === 0 ? (
+          <li className="px-5 py-8 text-center text-sm text-muted">No cameras registered in the database yet.</li>
+        ) : cameras.map((camera) => (
           <li key={camera.id} className="flex items-center justify-between gap-3 px-5 py-3">
             <div className="min-w-0">
               <p className="truncate text-sm font-medium">{camera.name}</p>
