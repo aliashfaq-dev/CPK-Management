@@ -1,7 +1,16 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { faBell, faBullseye, faFlag, faGear, faUser, faUsers, faVideo } from "@fortawesome/free-solid-svg-icons";
+import {
+  faBell,
+  faBullseye,
+  faFlag,
+  faGear,
+  faTriangleExclamation,
+  faUser,
+  faUsers,
+  faVideo,
+} from "@fortawesome/free-solid-svg-icons";
 import type { AppSettings, Camera, User } from "@/types";
 import { Card } from "@/components/ui/Card";
 import { LoadingState } from "@/components/ui/LoadingState";
@@ -9,6 +18,7 @@ import { Tabs, type TabItem } from "@/components/ui/Tabs";
 import { useLocalStorage } from "@/hooks/useLocalStorage";
 import { DEFAULT_SETTINGS } from "@/lib/constants";
 import { CameraSettings } from "./CameraSettings";
+import { DangerZoneSettings } from "./DangerZoneSettings";
 import { DetectionSettings } from "./DetectionSettings";
 import { GeneralSettings } from "./GeneralSettings";
 import { NotificationSettings } from "./NotificationSettings";
@@ -33,6 +43,7 @@ export function SettingsView({ cameras, user }: { cameras: Camera[]; user: User 
             ...BASE_TABS,
             { id: "watchlist", label: "Watchlist", icon: faFlag },
             { id: "users", label: "Users", icon: faUsers },
+            { id: "danger", label: "Danger zone", icon: faTriangleExclamation },
           ]
         : BASE_TABS,
     [isAdmin],
@@ -56,6 +67,7 @@ export function SettingsView({ cameras, user }: { cameras: Camera[]; user: User 
             {tab === "profile" && <ProfileSettings user={user} />}
             {tab === "watchlist" && isAdmin && <WatchlistSettings />}
             {tab === "users" && isAdmin && <UsersSettings currentUserId={user.id} />}
+            {tab === "danger" && isAdmin && <DangerZoneSettings />}
           </>
         )}
       </div>

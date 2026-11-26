@@ -226,6 +226,49 @@ export async function getColourOptions(): Promise<string[]> {
   return result.rows.map((row) => String(row.colour));
 }
 
+export interface FilteredSummary {
+  total: number;
+  withPlate: number;
+  byType: Record<VehicleType, number>;
+}
+
+/** Aggregated counts for the assistant's `summary` intent — computed strictly in SQL. */
+export async function getFilteredSummary(filters: DetectionFilters): Promise<FilteredSummary> {
+  const where = buildWhere(filters);
+  const [totalsRes, typesRes] = await Promise.all([
+    query<Row>(
+      `SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE v.has_plate) AS with_plate
+       FROM public.v_events_dashboard v ${where.clause}`,
+      where.params,
+    ),
+    query<Row>(
+      `SELECT v.vehicle_type, COUNT(*) AS total
+       FROM public.v_events_dashboard v ${where.clause}
+       GROUP BY v.vehicle_type`,
+      where.params,
+    ),
+  ]);
+  const byType: Record<VehicleType, number> = {
+    car: 0,
+    rickshaw: 0,
+    htv: 0,
+    van: 0,
+    pickup: 0,
+    bike: 0,
+  };
+  for (const row of typesRes.rows) {
+    const key = String(row.vehicle_type) as VehicleType;
+    if (key in byType) {
+      byType[key] = asNumber(row.total);
+    }
+  }
+  return {
+    total: asNumber(totalsRes.rows[0]?.total),
+    withPlate: asNumber(totalsRes.rows[0]?.with_plate),
+    byType,
+  };
+}
+
 export async function getCameras(): Promise<Camera[]> {
   const result = await query<Row>(`
     SELECT c.camera_id, c.name, c.location, c.is_active, c.created_at,

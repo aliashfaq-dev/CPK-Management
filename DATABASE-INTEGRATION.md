@@ -1,28 +1,22 @@
-# Neon database integration
+# PostgreSQL Integration (Neon & Local Docker)
 
-This project reads live camera and vehicle-detection data from the existing Neon PostgreSQL schema. It does not create, seed, update, or delete database records.
+This dashboard works identically against **Neon PostgreSQL** and **local Docker PostgreSQL 16** using the standard `pg` driver (`src/lib/db.ts` and `src/lib/live.ts`). Switching environments only requires updating `DATABASE_URL` (and `DATABASE_URL_DIRECT` on Neon).
 
-## Local setup
+## Connection URLs & TLS
 
-1. Copy `.env.local.example` to `.env.local`.
-2. Put the real Neon connection string in `DATABASE_URL` (server-side only).
-3. Run `npm install` so `@neondatabase/serverless` is installed and `package-lock.json` is refreshed.
-4. Run `npm run dev`.
-5. Open `/api/db-check` to verify the database connection. The endpoint returns only a connection status; it does not expose schema or records.
+- **Neon:** Set `DATABASE_URL` to the pooled connection string (`?sslmode=require`) and `DATABASE_URL_DIRECT` to the direct (non-pooler) connection string (`?sslmode=require`). `LISTEN/NOTIFY` (`src/lib/live.ts`) requires `DATABASE_URL_DIRECT` because PgBouncer pooled endpoints on Neon do not support `LISTEN`.
+- **Local Docker Postgres (`docker-compose.db.yml`):** Set `DATABASE_URL=postgres://cpk:cpk_local_password@127.0.0.1:5432/cpk` (no `sslmode`, so TLS is disabled automatically) and leave `DATABASE_URL_DIRECT` blank.
 
-## Automatic UI refresh
+## Schema ownership
 
-The authenticated dashboard refreshes its server-rendered data every 10 seconds while the browser tab is visible. New rows inserted by the detection/ingestion service will appear on the dashboard, detections, cameras/live-camera, find-flag and analytics pages after the next refresh.
+- **Pipeline-owned tables** (never altered or dropped by the frontend; reference copy in `sql/pipeline-schema.sql`): `public.cameras`, `public.runs`, `public.events`.
+- **Frontend-owned objects** (`sql/frontend.sql`, applied idempotently via `npm run db:migrate`):
+  - `public.v_events_dashboard` — projects `events` columns and extracts stage-2 `make`, `model`, and `colour` from `analysis` JSONB.
+  - `public.app_users` — `admin` and `viewer` accounts with `bcryptjs` password hashes.
+  - `public.watchlist` — normalized uppercase alphanumeric (`A-Z0-9`) plates for high-severity alerts.
+  - `public.app_settings` — JSONB key-value store for alert rules and `empty_database_audit` history.
+  - `trg_events_changed` — `AFTER INSERT OR UPDATE` trigger calling `pg_notify('events_changed', ...)`.
 
-## Database mapping
+## Realtime updates & hosting
 
-- `public.cameras` supplies camera cards and status.
-- `public.events` supplies detection counts, timestamps and analysis metadata.
-- `public.v_events_dashboard` supplies dashboard-ready vehicle make/model/colour and plate fields.
-- `public.runs` remains available in the database but is not yet displayed because the current UI has no runs page/widget.
-
-The `neon_auth` tables are not wired into the current demo login. Existing login remains local/demo authentication until the backend owner provides the intended Neon Auth integration contract. Camera stream URLs are also not present in the inspected schema, so the live-camera page can show registered cameras and detection overlays but cannot invent a live video feed.
-
-## Vercel
-
-Add `DATABASE_URL` to the Vercel project's Environment Variables for Production (and Preview/Development if required), then redeploy. Never add it as a `NEXT_PUBLIC_` variable. Keep `.env.local` out of Git.
+New detections and stage-2 `analysis` updates stream immediately over `/api/live/events` (SSE) — the legacy 10-second polling refresh has been removed. Deploy on a long-lived Node process (`npm run build && npm start`), not on serverless functions.
