@@ -1,7 +1,6 @@
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
-import { AutoRefresh } from "@/components/system/AutoRefresh";
 import { getSessionUser } from "@/lib/auth-server";
 import { getNotifications } from "@/lib/data-service";
 
@@ -12,7 +11,6 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   if (!user) redirect("/login");
   return (
     <DashboardLayout user={user} notifications={notifications}>
-      <AutoRefresh />
       {children}
     </DashboardLayout>
   );

@@ -9,13 +9,16 @@ import {
   faChevronDown,
   faChevronRight,
   faRightFromBracket,
+  faXmark,
 } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { NAV_ITEMS } from "@/data/navigation";
 import type { AppNotification, User } from "@/types";
+import { Badge } from "@/components/ui/StatusBadge";
 import { Button } from "@/components/ui/Button";
 import { Popover } from "@/components/ui/Popover";
-import { cn } from "@/lib/utils";
+import { useLiveEvents } from "@/hooks/useLiveEvents";
+import { cn, formatDateTime } from "@/lib/utils";
 import { isActivePath } from "./Sidebar";
 import { NavbarClock } from "./NavbarClock";
 
@@ -35,10 +38,12 @@ function roleLabel(role: User["role"]): string {
   return role === "admin" ? "Administrator" : "Viewer";
 }
 
-function HeaderComponent({ user, notifications, onMenuClick }: HeaderProps) {
+function HeaderComponent({ user, notifications: initialNotifications, onMenuClick }: HeaderProps) {
   const pathname = usePathname();
   const router = useRouter();
   const current = NAV_ITEMS.find((item) => isActivePath(pathname, item.href));
+  const { status, notifications, unreadCount, activeToast, markAlertsRead, dismissToast } =
+    useLiveEvents(initialNotifications);
 
   const onLogout = useCallback(async () => {
     await fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined);
@@ -46,125 +51,166 @@ function HeaderComponent({ user, notifications, onMenuClick }: HeaderProps) {
     router.refresh();
   }, [router]);
 
+  const displayedNotifications = notifications.length > 0 ? notifications : initialNotifications;
+
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-line bg-surface px-4 md:px-6">
-      <Button variant="ghost" size="icon" icon={faBars} aria-label="Open navigation" className="md:hidden" onClick={onMenuClick} />
+    <>
+      <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-line bg-surface px-4 md:px-6">
+        <Button variant="ghost" size="icon" icon={faBars} aria-label="Open navigation" className="md:hidden" onClick={onMenuClick} />
 
-      <div className="min-w-0">
-        <nav aria-label="Breadcrumb" className="hidden text-xs text-muted sm:block">
-          <ol className="flex items-center gap-1.5">
-            <li>
-              <Link href="/" className="hover:text-fg">
-                Home
-              </Link>
-            </li>
-            {current && current.href !== "/" && (
-              <>
-                <li aria-hidden="true">
-                  <FontAwesomeIcon icon={faChevronRight} className="text-[9px]" />
-                </li>
-                <li aria-current="page" className="text-fg">
-                  {current.label}
-                </li>
-              </>
-            )}
-          </ol>
-        </nav>
-        <h1 className="truncate text-base font-semibold leading-tight sm:text-lg">{current?.label ?? "Vehicle Tracking"}</h1>
-      </div>
-
-      <div className="ml-auto flex items-center gap-2">
-        <NavbarClock />
-
-        <Popover
-          label="Notifications"
-          buttonClassName="relative w-9 justify-center"
-          panelClassName="w-80 max-w-[calc(100vw-2rem)]"
-          trigger={
-            <>
-              <FontAwesomeIcon icon={faBell} />
-              {notifications.length > 0 && (
-                <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-danger" aria-hidden="true" />
+        <div className="min-w-0">
+          <nav aria-label="Breadcrumb" className="hidden text-xs text-muted sm:block">
+            <ol className="flex items-center gap-1.5">
+              <li>
+                <Link href="/" className="hover:text-fg">
+                  Home
+                </Link>
+              </li>
+              {current && current.href !== "/" && (
+                <>
+                  <li aria-hidden="true">
+                    <FontAwesomeIcon icon={faChevronRight} className="text-[9px]" />
+                  </li>
+                  <li aria-current="page" className="text-fg">
+                    {current.label}
+                  </li>
+                </>
               )}
-            </>
-          }
-        >
-          {(close) => (
-            <div>
-              <div className="border-b border-line px-4 py-3 text-sm font-semibold">Notifications</div>
-              {notifications.length === 0 ? (
-                <p className="px-4 py-6 text-center text-xs text-muted">No alerts right now.</p>
-              ) : (
-                <ul className="max-h-80 divide-y divide-line overflow-y-auto">
-                  {notifications.map((item) => (
-                    <li key={item.id} className="flex gap-3 px-4 py-3">
-                      <span className={cn("mt-1.5 h-2 w-2 shrink-0 rounded-full", toneDot[item.tone])} aria-hidden="true" />
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium">{item.title}</p>
-                        <p className="text-xs text-muted">{item.description}</p>
-                        <p className="mt-1 text-xs text-muted">{item.time}</p>
-                      </div>
+            </ol>
+          </nav>
+          <h1 className="truncate text-base font-semibold leading-tight sm:text-lg">{current?.label ?? "Vehicle Tracking"}</h1>
+        </div>
+
+        <div className="ml-auto flex items-center gap-2">
+          <span className="hidden sm:inline-flex" aria-live="polite">
+            <Badge tone={status === "live" ? "success" : "warning"} dot>
+              {status === "live" ? "Live" : "Reconnecting"}
+            </Badge>
+          </span>
+
+          <NavbarClock />
+
+          <Popover
+            label={unreadCount > 0 ? `Notifications (${unreadCount} unread)` : "Notifications"}
+            buttonClassName="relative w-9 justify-center"
+            panelClassName="w-80 max-w-[calc(100vw-2rem)]"
+            trigger={
+              <>
+                <FontAwesomeIcon icon={faBell} />
+                {unreadCount > 0 && (
+                  <span
+                    className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-semibold text-white"
+                    aria-hidden="true"
+                  >
+                    {unreadCount > 9 ? "9+" : unreadCount}
+                  </span>
+                )}
+              </>
+            }
+          >
+            {(close) => (
+              <div onMouseEnter={markAlertsRead} onFocus={markAlertsRead}>
+                <div className="flex items-center justify-between border-b border-line px-4 py-3">
+                  <span className="text-sm font-semibold">Alerts</span>
+                  {unreadCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={markAlertsRead}
+                      className="text-xs font-medium text-accent hover:underline"
+                    >
+                      Mark read
+                    </button>
+                  )}
+                </div>
+                {displayedNotifications.length === 0 ? (
+                  <p className="px-4 py-6 text-center text-xs text-muted">No watchlist or rule alerts yet.</p>
+                ) : (
+                  <ul className="max-h-80 divide-y divide-line overflow-y-auto">
+                    {displayedNotifications.map((item) => (
+                      <li key={item.id} className="flex gap-3 px-4 py-3">
+                        <span className={cn("mt-1.5 h-2 w-2 shrink-0 rounded-full", toneDot[item.tone])} aria-hidden="true" />
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium">{item.title}</p>
+                          <p className="text-xs text-muted">{item.description}</p>
+                          <p className="mt-1 text-xs text-muted">{formatDateTime(item.time)} UTC</p>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <Link href="/settings" onClick={() => { markAlertsRead(); close(); }} className="block border-t border-line px-4 py-3 text-center text-sm font-medium text-accent hover:bg-subtle">
+                  Alert &amp; watchlist settings
+                </Link>
+              </div>
+            )}
+          </Popover>
+
+          <Popover
+            label="Account menu"
+            buttonClassName="gap-2 px-1.5 text-fg"
+            panelClassName="w-64"
+            trigger={
+              <>
+                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-accent-soft text-xs font-semibold text-accent">
+                  {user.initials}
+                </span>
+                <span className="hidden text-left sm:block">
+                  <span className="block text-sm font-medium leading-tight">{user.name}</span>
+                  <span className="block text-xs leading-tight text-muted">{roleLabel(user.role)}</span>
+                </span>
+                <FontAwesomeIcon icon={faChevronDown} className="hidden text-[10px] text-muted sm:block" />
+              </>
+            }
+          >
+            {(close) => (
+              <div>
+                <div className="border-b border-line px-4 py-3">
+                  <p className="text-sm font-medium">{user.name}</p>
+                  <p className="truncate text-xs text-muted">{user.email}</p>
+                </div>
+                <ul className="p-1.5 text-sm">
+                  {["Profile settings", "Notification preferences", "Camera settings"].map((label) => (
+                    <li key={label}>
+                      <Link href="/settings" onClick={close} className="block rounded-md px-3 py-2 hover:bg-subtle">
+                        {label}
+                      </Link>
                     </li>
                   ))}
                 </ul>
-              )}
-              <Link href="/settings" onClick={close} className="block border-t border-line px-4 py-3 text-center text-sm font-medium text-accent hover:bg-subtle">
-                Notification settings
-              </Link>
-            </div>
-          )}
-        </Popover>
+                <div className="border-t border-line p-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      close();
+                      void onLogout();
+                    }}
+                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium text-danger-strong hover:bg-subtle"
+                  >
+                    <FontAwesomeIcon icon={faRightFromBracket} className="w-4" />
+                    Log out
+                  </button>
+                </div>
+              </div>
+            )}
+          </Popover>
+        </div>
+      </header>
 
-        <Popover
-          label="Account menu"
-          buttonClassName="gap-2 px-1.5 text-fg"
-          panelClassName="w-64"
-          trigger={
-            <>
-              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-accent-soft text-xs font-semibold text-accent">
-                {user.initials}
-              </span>
-              <span className="hidden text-left sm:block">
-                <span className="block text-sm font-medium leading-tight">{user.name}</span>
-                <span className="block text-xs leading-tight text-muted">{roleLabel(user.role)}</span>
-              </span>
-              <FontAwesomeIcon icon={faChevronDown} className="hidden text-[10px] text-muted sm:block" />
-            </>
-          }
+      {activeToast && (
+        <div
+          role="status"
+          aria-live="assertive"
+          className="fixed right-4 top-20 z-50 flex w-full max-w-sm items-start gap-3 rounded-lg border border-danger/40 bg-surface p-4"
         >
-          {(close) => (
-            <div>
-              <div className="border-b border-line px-4 py-3">
-                <p className="text-sm font-medium">{user.name}</p>
-                <p className="truncate text-xs text-muted">{user.email}</p>
-              </div>
-              <ul className="p-1.5 text-sm">
-                {["Profile settings", "Notification preferences", "Camera settings"].map((label) => (
-                  <li key={label}>
-                    <Link href="/settings" onClick={close} className="block rounded-md px-3 py-2 hover:bg-subtle">
-                      {label}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-              <div className="border-t border-line p-1.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    close();
-                    void onLogout();
-                  }}
-                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium text-danger-strong hover:bg-subtle"
-                >
-                  <FontAwesomeIcon icon={faRightFromBracket} className="w-4" />
-                  Log out
-                </button>
-              </div>
-            </div>
-          )}
-        </Popover>
-      </div>
-    </header>
+          <span className={cn("mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full", toneDot[activeToast.tone])} aria-hidden="true" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold">{activeToast.title}</p>
+            <p className="mt-0.5 text-xs text-muted">{activeToast.description}</p>
+          </div>
+          <Button variant="ghost" size="icon" icon={faXmark} aria-label="Dismiss alert" onClick={dismissToast} className="h-7 w-7" />
+        </div>
+      )}
+    </>
   );
 }
 

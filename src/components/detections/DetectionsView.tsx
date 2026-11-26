@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
-import { useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { faDownload, faRotateLeft } from "@fortawesome/free-solid-svg-icons";
 import type { Camera, Detection, DetectionQuery, DetectionSortKey, Page } from "@/types";
 import { Button } from "@/components/ui/Button";
@@ -11,12 +11,12 @@ import { Input } from "@/components/ui/Input";
 import { Pagination } from "@/components/ui/Pagination";
 import { SearchInput } from "@/components/ui/SearchInput";
 import { Select } from "@/components/ui/Select";
+import { useLiveDetectionSubscription } from "@/hooks/useLiveEvents";
 import { VEHICLE_TYPES, VEHICLE_TYPE_LABELS } from "@/lib/constants";
-import { filtersToParams } from "@/lib/detection-query";
+import { filtersToParams, normalizePlate } from "@/lib/detection-query";
 import { cn } from "@/lib/utils";
 import { DetectionDetailDrawer } from "./DetectionDetailDrawer";
 import { DetectionTable } from "./DetectionTable";
-import { useState } from "react";
 
 const CONFIDENCE_OPTIONS = [
   { value: "0", label: "Any confidence" },
@@ -32,12 +32,70 @@ interface DetectionsViewProps {
   colours: string[];
 }
 
-/** Filters, sorting and paging live in the URL; the server returns exactly one page. */
+function matchesQuery(detection: Detection, query: DetectionQuery): boolean {
+  if (query.plate) {
+    const norm = normalizePlate(detection.plate);
+    if (!norm.includes(normalizePlate(query.plate))) return false;
+  }
+  if (query.plateExact && normalizePlate(detection.plate) !== normalizePlate(query.plateExact)) {
+    return false;
+  }
+  if (query.type && detection.vehicleType !== query.type) return false;
+  if (query.camera && detection.cameraId !== query.camera) return false;
+  if (query.from && detection.detectedAt < query.from) return false;
+  if (query.to && detection.detectedAt >= query.to) return false;
+  if (query.colour && (detection.color ?? "").toLowerCase() !== query.colour.toLowerCase()) return false;
+  if (query.hasPlate !== undefined && detection.hasPlate !== query.hasPlate) return false;
+  if (query.minConfidence && detection.confidence < query.minConfidence) return false;
+  return true;
+}
+
+/** Filters, sorting and paging live in the URL; live detections merge smoothly into page 1. */
 export function DetectionsView({ result, query, cameras, colours }: DetectionsViewProps) {
   const router = useRouter();
   const pathname = usePathname();
   const [pending, startTransition] = useTransition();
   const [selected, setSelected] = useState<Detection | null>(null);
+  const [rows, setRows] = useState<Detection[]>(result.rows);
+  const [total, setTotal] = useState<number>(result.total);
+  const [highlightIds, setHighlightIds] = useState<Set<string>>(() => new Set());
+
+  useEffect(() => {
+    setRows(result.rows);
+    setTotal(result.total);
+    setHighlightIds(new Set());
+  }, [result]);
+
+  useLiveDetectionSubscription(({ detection, isUpdate }) => {
+    if (isUpdate) {
+      setRows((current) => current.map((row) => (row.id === detection.id ? detection : row)));
+      setSelected((current) => (current?.id === detection.id ? detection : current));
+      return;
+    }
+
+    if (!matchesQuery(detection, query)) return;
+
+    setTotal((current) => current + 1);
+    if (query.page === 1 && query.sort === "detectedAt" && query.dir === "desc") {
+      setRows((current) => {
+        if (current.some((row) => row.id === detection.id)) return current;
+        return [detection, ...current].slice(0, result.pageSize);
+      });
+      setHighlightIds((current) => {
+        const next = new Set(current);
+        next.add(detection.id);
+        return next;
+      });
+      window.setTimeout(() => {
+        setHighlightIds((current) => {
+          if (!current.has(detection.id)) return current;
+          const next = new Set(current);
+          next.delete(detection.id);
+          return next;
+        });
+      }, 6_000);
+    }
+  });
 
   const navigate = (patch: Partial<DetectionQuery>) => {
     const next = { ...query, page: 1, ...patch };
@@ -108,19 +166,26 @@ export function DetectionsView({ result, query, cameras, colours }: DetectionsVi
           <Button icon={faRotateLeft} onClick={() => startTransition(() => router.push(pathname))}>
             Reset filters
           </Button>
-          <Button variant="primary" icon={faDownload} onClick={() => window.location.assign(exportHref)} disabled={result.total === 0}>
+          <Button variant="primary" icon={faDownload} onClick={() => window.location.assign(exportHref)} disabled={total === 0}>
             Export CSV
           </Button>
         </div>
       </Card>
 
       <Card className={cn("overflow-hidden transition-opacity", pending && "opacity-60")} aria-busy={pending}>
-        {result.total === 0 ? (
+        {total === 0 ? (
           <EmptyState title="No detections match these filters" description="Try a different plate number, or reset the filters to see every record." />
         ) : (
           <>
-            <DetectionTable detections={result.rows} sortKey={query.sort} sortDirection={query.dir} onSort={handleSort} onSelect={setSelected} />
-            <Pagination page={result.page} pageSize={result.pageSize} total={result.total} onPageChange={(page) => navigate({ page })} />
+            <DetectionTable
+              detections={rows}
+              sortKey={query.sort}
+              sortDirection={query.dir}
+              onSort={handleSort}
+              onSelect={setSelected}
+              highlightIds={highlightIds}
+            />
+            <Pagination page={result.page} pageSize={result.pageSize} total={total} onPageChange={(page) => navigate({ page })} />
           </>
         )}
       </Card>

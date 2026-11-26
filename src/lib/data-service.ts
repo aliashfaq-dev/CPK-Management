@@ -147,6 +147,38 @@ export async function getDetectionsByIds(ids: string[]): Promise<Detection[]> {
   return result.rows.map(rowToDetection);
 }
 
+export async function getDetectionById(eventId: string): Promise<Detection | null> {
+  const rows = await getDetectionsByIds([eventId]);
+  return rows[0] ?? null;
+}
+
+/**
+ * Returns detections recorded strictly after `lastEventId` (ordered oldest-first) so a
+ * reconnecting SSE client with `Last-Event-ID` can catch up without gaps.
+ */
+export async function getDetectionsAfterEventId(lastEventId: string, limit = 100): Promise<Detection[]> {
+  const safeLimit = Math.min(200, Math.max(1, Math.floor(limit)));
+  const anchor = await query<Row>(
+    "SELECT COALESCE(created_at, event_time) AS ts FROM public.events WHERE event_id = $1 LIMIT 1",
+    [lastEventId],
+  );
+  const anchorTs = anchor.rows[0]?.ts ? iso(anchor.rows[0].ts) : null;
+  if (!anchorTs) return [];
+
+  const result = await query<Row>(
+    `SELECT ${DETECTION_COLUMNS}
+     FROM public.v_events_dashboard v
+     JOIN public.events e ON e.event_id = v.event_id
+     LEFT JOIN public.cameras c ON c.camera_id = v.camera_id
+     WHERE (COALESCE(e.created_at, v.event_time) > $1::timestamptz)
+        OR (COALESCE(e.created_at, v.event_time) = $1::timestamptz AND v.event_id > $2)
+     ORDER BY COALESCE(e.created_at, v.event_time) ASC, v.event_id ASC
+     LIMIT $3`,
+    [anchorTs, lastEventId, safeLimit],
+  );
+  return result.rows.map(rowToDetection);
+}
+
 /**
  * Walks every matching detection in batches (keyset pagination on event_time, event_id) so an
  * export never holds more than one batch in memory.
@@ -428,7 +460,33 @@ export async function getAnalytics(range: { from: string; to: string }): Promise
   };
 }
 
-// Replaced by watchlist/live alerts in Phase 4.
+/** Recent watchlist matches formatted for the header notification bell on initial page load. */
 export async function getNotifications(): Promise<AppNotification[]> {
-  return [];
+  try {
+    const result = await query<Row>(
+      `SELECT v.event_id, v.number_plate, v.event_time, v.camera_id,
+              c.name AS camera_name, c.location AS camera_location,
+              w.plate_norm, w.note
+       FROM public.v_events_dashboard v
+       JOIN public.watchlist w ON w.plate_norm = ${PLATE_NORM_SQL}
+       LEFT JOIN public.cameras c ON c.camera_id = v.camera_id
+       WHERE v.has_plate
+       ORDER BY v.event_time DESC NULLS LAST
+       LIMIT 20`,
+    );
+    return result.rows.map((row) => {
+      const plate = String(row.number_plate || row.plate_norm);
+      const cameraName = String(row.camera_name || row.camera_id || "Unknown camera");
+      const note = typeof row.note === "string" && row.note.trim() ? ` · ${row.note.trim()}` : "";
+      return {
+        id: `wl-${String(row.event_id)}`,
+        title: `Watchlist match · ${plate}`,
+        description: `${cameraName}${note}`,
+        time: iso(row.event_time),
+        tone: "danger" as const,
+      };
+    });
+  } catch {
+    return [];
+  }
 }

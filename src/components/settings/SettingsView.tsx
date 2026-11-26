@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { faBell, faBullseye, faGear, faUser, faUsers, faVideo } from "@fortawesome/free-solid-svg-icons";
+import { faBell, faBullseye, faFlag, faGear, faUser, faUsers, faVideo } from "@fortawesome/free-solid-svg-icons";
 import type { AppSettings, Camera, User } from "@/types";
 import { Card } from "@/components/ui/Card";
 import { LoadingState } from "@/components/ui/LoadingState";
@@ -14,6 +14,7 @@ import { GeneralSettings } from "./GeneralSettings";
 import { NotificationSettings } from "./NotificationSettings";
 import { ProfileSettings } from "./ProfileSettings";
 import { UsersSettings } from "./UsersSettings";
+import { WatchlistSettings } from "./WatchlistSettings";
 
 const BASE_TABS: TabItem[] = [
   { id: "general", label: "General", icon: faGear },
@@ -26,7 +27,14 @@ const BASE_TABS: TabItem[] = [
 export function SettingsView({ cameras, user }: { cameras: Camera[]; user: User }) {
   const isAdmin = user.role === "admin";
   const tabs = useMemo<TabItem[]>(
-    () => (isAdmin ? [...BASE_TABS, { id: "users", label: "Users", icon: faUsers }] : BASE_TABS),
+    () =>
+      isAdmin
+        ? [
+            ...BASE_TABS,
+            { id: "watchlist", label: "Watchlist", icon: faFlag },
+            { id: "users", label: "Users", icon: faUsers },
+          ]
+        : BASE_TABS,
     [isAdmin],
   );
   const [tab, setTab] = useState("general");
@@ -44,8 +52,9 @@ export function SettingsView({ cameras, user }: { cameras: Camera[]; user: User 
             {tab === "general" && <GeneralSettings settings={settings} update={update} />}
             {tab === "detection" && <DetectionSettings settings={settings} update={update} />}
             {tab === "cameras" && <CameraSettings initialCameras={cameras} />}
-            {tab === "notifications" && <NotificationSettings settings={settings} update={update} />}
+            {tab === "notifications" && <NotificationSettings settings={settings} update={update} isAdmin={isAdmin} />}
             {tab === "profile" && <ProfileSettings user={user} />}
+            {tab === "watchlist" && isAdmin && <WatchlistSettings />}
             {tab === "users" && isAdmin && <UsersSettings currentUserId={user.id} />}
           </>
         )}

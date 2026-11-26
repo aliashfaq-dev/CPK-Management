@@ -49,6 +49,8 @@ export interface Detection {
   plateDetectionConfidence: number | null;
   hasVehicleImage: boolean;
   hasPlateImage: boolean;
+  /** Present on realtime SSE messages to distinguish stage-2 analysis updates from new rows. */
+  type?: "insert" | "update";
 }
 
 export interface Camera {
@@ -189,4 +191,25 @@ export interface Page<T> {
   total: number;
   page: number;
   pageSize: number;
+}
+
+export interface WatchlistEntry {
+  id: string;
+  plateNorm: string;
+  note: string | null;
+  createdAt: string;
+}
+
+export interface AlertRuleSettings {
+  alertNoPlate: boolean;
+  alertLowConfidence: boolean;
+  lowConfidenceThreshold: number;
+}
+
+export interface LiveAlertPayload {
+  id: string;
+  severity: "high" | "medium" | "low";
+  reason: string;
+  createdAt: string;
+  event: Detection;
 }
