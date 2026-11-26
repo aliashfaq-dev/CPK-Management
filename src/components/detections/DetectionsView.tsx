@@ -2,34 +2,21 @@
 
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
-import { faDownload, faRotateLeft } from "@fortawesome/free-solid-svg-icons";
-import type { Camera, Detection, DetectionQuery, DetectionSortKey, Page } from "@/types";
+import { faDownload, faXmark } from "@fortawesome/free-solid-svg-icons";
+import type { Detection, DetectionQuery, DetectionSortKey, Page } from "@/types";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { Input } from "@/components/ui/Input";
 import { Pagination } from "@/components/ui/Pagination";
-import { SearchInput } from "@/components/ui/SearchInput";
-import { Select } from "@/components/ui/Select";
 import { useLiveDetectionSubscription } from "@/hooks/useLiveEvents";
-import { VEHICLE_TYPES, VEHICLE_TYPE_LABELS } from "@/lib/constants";
 import { filtersToParams, normalizePlate } from "@/lib/detection-query";
-import { cn } from "@/lib/utils";
+import { cn, formatNumber } from "@/lib/utils";
 import { DetectionDetailDrawer } from "./DetectionDetailDrawer";
 import { DetectionTable } from "./DetectionTable";
-
-const CONFIDENCE_OPTIONS = [
-  { value: "0", label: "Any confidence" },
-  { value: "90", label: "90% or higher" },
-  { value: "95", label: "95% or higher" },
-  { value: "98", label: "98% or higher" },
-];
 
 interface DetectionsViewProps {
   result: Page<Detection>;
   query: DetectionQuery;
-  cameras: Camera[];
-  colours: string[];
 }
 
 function matchesQuery(detection: Detection, query: DetectionQuery): boolean {
@@ -50,8 +37,22 @@ function matchesQuery(detection: Detection, query: DetectionQuery): boolean {
   return true;
 }
 
-/** Filters, sorting and paging live in the URL; live detections merge smoothly into page 1. */
-export function DetectionsView({ result, query, cameras, colours }: DetectionsViewProps) {
+function hasActiveFilter(query: DetectionQuery): boolean {
+  return Boolean(
+    query.plate ||
+      query.plateExact ||
+      query.type ||
+      query.camera ||
+      query.from ||
+      query.to ||
+      query.colour ||
+      query.hasPlate !== undefined ||
+      query.minConfidence,
+  );
+}
+
+/** Server-paginated detections table with live SSE row insertion and CSV export. */
+export function DetectionsView({ result, query }: DetectionsViewProps) {
   const router = useRouter();
   const pathname = usePathname();
   const [pending, startTransition] = useTransition();
@@ -109,72 +110,47 @@ export function DetectionsView({ result, query, cameras, colours }: DetectionsVi
   };
 
   const exportHref = `/api/detections/export?${filtersToParams(query).toString()}`;
+  const filtered = hasActiveFilter(query);
 
   return (
     <>
-      <Card className="mb-4 p-4">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
-          <div className="space-y-1.5 sm:col-span-2">
-            <span className="block text-xs font-medium">License plate</span>
-            <SearchInput
-              value={query.plate ?? ""}
-              onChange={(plate) => navigate({ plate: plate.trim() || undefined })}
-              placeholder="Search by plate, e.g. BKL-2847"
-              label="Search by license plate"
-            />
+      <Card className={cn("overflow-hidden transition-opacity", pending && "opacity-60")} aria-busy={pending}>
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-3">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
+            <span className="font-medium text-fg">
+              {formatNumber(total)} detection{total === 1 ? "" : "s"}
+            </span>
+            {filtered && (
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={faXmark}
+                onClick={() => startTransition(() => router.push(pathname))}
+              >
+                Show all detections
+              </Button>
+            )}
           </div>
-          <Select
-            label="Vehicle type"
-            value={query.type ?? "all"}
-            onChange={(e) => navigate({ type: e.target.value === "all" ? undefined : (e.target.value as DetectionQuery["type"]) })}
-            options={[{ value: "all", label: "All types" }, ...VEHICLE_TYPES.map((type) => ({ value: type, label: VEHICLE_TYPE_LABELS[type] }))]}
-          />
-          <Select
-            label="Camera"
-            value={query.camera ?? "all"}
-            onChange={(e) => navigate({ camera: e.target.value === "all" ? undefined : e.target.value })}
-            options={[{ value: "all", label: "All cameras" }, ...cameras.map((camera) => ({ value: camera.id, label: `${camera.id} · ${camera.name}` }))]}
-          />
-          <Input type="date" label="From (UTC)" value={query.from?.slice(0, 10) ?? ""} onChange={(e) => navigate({ from: e.target.value ? `${e.target.value}T00:00:00.000Z` : undefined })} />
-          <Input
-            type="date"
-            label="To (UTC)"
-            value={query.to ? new Date(Date.parse(query.to) - 86_400_000).toISOString().slice(0, 10) : ""}
-            onChange={(e) => navigate({ to: e.target.value ? new Date(Date.parse(`${e.target.value}T00:00:00Z`) + 86_400_000).toISOString() : undefined })}
-          />
-        </div>
-        <div className="mt-3 grid gap-3 sm:grid-cols-3">
-          <Select label="Confidence" value={String(query.minConfidence ?? 0)} onChange={(e) => navigate({ minConfidence: Number(e.target.value) || undefined })} options={CONFIDENCE_OPTIONS} />
-          <Select
-            label="Plate"
-            value={query.hasPlate === undefined ? "all" : query.hasPlate ? "yes" : "no"}
-            onChange={(e) => navigate({ hasPlate: e.target.value === "all" ? undefined : e.target.value === "yes" })}
-            options={[
-              { value: "all", label: "With or without plate" },
-              { value: "yes", label: "Plate read" },
-              { value: "no", label: "No plate read" },
-            ]}
-          />
-          <Select
-            label="Colour"
-            value={query.colour ?? "all"}
-            onChange={(e) => navigate({ colour: e.target.value === "all" ? undefined : e.target.value })}
-            options={[{ value: "all", label: colours.length ? "Any colour" : "Any colour (analysis pending)" }, ...colours.map((colour) => ({ value: colour, label: colour }))]}
-          />
-        </div>
-        <div className="mt-4 flex flex-wrap justify-end gap-2">
-          <Button icon={faRotateLeft} onClick={() => startTransition(() => router.push(pathname))}>
-            Reset filters
-          </Button>
-          <Button variant="primary" icon={faDownload} onClick={() => window.location.assign(exportHref)} disabled={total === 0}>
+          <Button
+            variant="primary"
+            size="sm"
+            icon={faDownload}
+            onClick={() => window.location.assign(exportHref)}
+            disabled={total === 0}
+          >
             Export CSV
           </Button>
         </div>
-      </Card>
 
-      <Card className={cn("overflow-hidden transition-opacity", pending && "opacity-60")} aria-busy={pending}>
         {total === 0 ? (
-          <EmptyState title="No detections match these filters" description="Try a different plate number, or reset the filters to see every record." />
+          <EmptyState
+            title={filtered ? "No detections match this search" : "No detections yet"}
+            description={
+              filtered
+                ? "Clear the active search to view all recorded detections."
+                : "New vehicle detections will appear here automatically."
+            }
+          />
         ) : (
           <>
             <DetectionTable

@@ -14,12 +14,14 @@ interface VehicleThumbnailProps {
   eventId?: string;
   hasImage?: boolean;
   kind?: "vehicle" | "plate";
+  /** Renders the full uncropped snapshot at its native aspect ratio (`w-full h-auto`). */
+  natural?: boolean;
   alt?: string;
 }
 
 /**
- * Lazy-loaded snapshot thumbnail backed by `/api/images/[eventId]/[kind]`.
- * Shows a pulse skeleton while loading and falls back to a clean placeholder if absent or unreachable.
+ * Lazy-loaded snapshot backed by `/api/images/[eventId]/[kind]`.
+ * Never crops (`object-contain` everywhere); `natural` renders the full-resolution image at its native aspect ratio.
  */
 export function VehicleThumbnail({
   type,
@@ -27,6 +29,7 @@ export function VehicleThumbnail({
   eventId,
   hasImage = false,
   kind = "vehicle",
+  natural = false,
   alt,
 }: VehicleThumbnailProps) {
   const src = eventId && hasImage ? `/api/images/${encodeURIComponent(eventId)}/${kind}` : null;
@@ -48,7 +51,8 @@ export function VehicleThumbnail({
         role="img"
         aria-label={`${label} unavailable`}
         className={cn(
-          "flex h-9 w-12 shrink-0 items-center justify-center rounded border border-line bg-subtle text-muted",
+          "flex shrink-0 items-center justify-center rounded border border-line bg-subtle text-muted",
+          natural ? "min-h-40 w-full rounded-md text-3xl" : "h-10 w-14",
           className,
         )}
       >
@@ -57,10 +61,36 @@ export function VehicleThumbnail({
     );
   }
 
+  if (natural) {
+    return (
+      <div
+        className={cn(
+          "relative flex w-full items-center justify-center overflow-hidden rounded-md border border-line bg-canvas",
+          status === "loading" && "min-h-48",
+          className,
+        )}
+      >
+        {status === "loading" && <span className="absolute inset-0 animate-pulse bg-subtle" aria-hidden="true" />}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={src}
+          alt={label}
+          decoding="async"
+          onLoad={() => setStatus("loaded")}
+          onError={() => setStatus("error")}
+          className={cn(
+            "block h-auto max-h-[70vh] w-full object-contain transition-opacity",
+            status === "loaded" ? "opacity-100" : "opacity-0",
+          )}
+        />
+      </div>
+    );
+  }
+
   return (
     <span
       className={cn(
-        "relative flex h-9 w-12 shrink-0 items-center justify-center overflow-hidden rounded border border-line bg-subtle",
+        "relative flex h-10 w-14 shrink-0 items-center justify-center overflow-hidden rounded border border-line bg-canvas",
         className,
       )}
     >
@@ -74,8 +104,7 @@ export function VehicleThumbnail({
         onLoad={() => setStatus("loaded")}
         onError={() => setStatus("error")}
         className={cn(
-          "h-full w-full transition-opacity",
-          kind === "plate" ? "object-contain bg-canvas p-0.5" : "object-cover",
+          "h-full w-full object-contain transition-opacity",
           status === "loaded" ? "opacity-100" : "opacity-0",
         )}
       />

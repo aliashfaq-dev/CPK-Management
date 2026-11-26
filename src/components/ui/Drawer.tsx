@@ -20,7 +20,7 @@ export function Drawer({ open, onClose, title, children }: DrawerProps) {
   return (
     <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-labelledby={titleId}>
       <div className="absolute inset-0 bg-fg/40" onClick={onClose} aria-hidden="true" />
-      <aside className="absolute inset-y-0 right-0 flex w-full max-w-md flex-col border-l border-line bg-surface">
+      <aside className="absolute inset-y-0 right-0 flex w-full max-w-lg flex-col border-l border-line bg-surface">
         <div className="flex items-center justify-between border-b border-line px-5 py-4">
           <h2 id={titleId} className="text-base font-semibold">
             {title}

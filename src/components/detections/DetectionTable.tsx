@@ -40,33 +40,45 @@ const FULL_HEADERS: Header[] = [
 ];
 
 const COMPACT_HEADERS: Header[] = [
-  { label: "Vehicle image" },
-  { label: "Vehicle type" },
-  { label: "License plate" },
+  { label: "Vehicle" },
+  { label: "Type" },
+  { label: "Plate" },
   { label: "Camera" },
-  { label: "Location" },
   { label: "Time" },
-  { label: "Confidence" },
+  { label: "Confidence", className: "text-right" },
 ];
 
 function Plate({ detection }: { detection: Detection }) {
-  return detection.hasPlate && detection.plate ? <PlateTag plate={detection.plate} /> : <span className="text-xs text-muted">No plate read</span>;
+  return detection.hasPlate && detection.plate ? (
+    <PlateTag plate={detection.plate} />
+  ) : (
+    <span className="text-xs text-muted">No plate read</span>
+  );
 }
 
-function DetectionTableComponent({ detections, variant = "full", sortKey, sortDirection, onSort, onSelect, highlightIds }: DetectionTableProps) {
+function DetectionTableComponent({
+  detections,
+  variant = "full",
+  sortKey,
+  sortDirection,
+  onSort,
+  onSelect,
+  highlightIds,
+}: DetectionTableProps) {
   const full = variant === "full";
   const headers = full ? FULL_HEADERS : COMPACT_HEADERS;
+  const cellPad = full ? "px-4 py-3" : "px-3 py-2.5";
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[720px] text-left text-sm">
+    <div className={cn(full ? "overflow-x-auto" : "overflow-x-hidden")}>
+      <table className={cn("w-full text-left text-sm", full && "min-w-[680px]")}>
         <thead>
           <tr className="border-b border-line bg-subtle text-xs text-muted">
             {headers.map((header) => {
               const active = header.key !== undefined && header.key === sortKey;
               const ariaSort = active ? (sortDirection === "asc" ? "ascending" : "descending") : header.key ? "none" : undefined;
               return (
-                <th key={header.label} scope="col" aria-sort={ariaSort} className={cn("px-4 py-3 font-medium", header.className)}>
+                <th key={header.label} scope="col" aria-sort={ariaSort} className={cn(cellPad, "font-medium", header.className)}>
                   {header.key && onSort ? (
                     <button type="button" onClick={() => onSort(header.key as DetectionSortKey)} className="inline-flex items-center gap-1.5 hover:text-fg">
                       {header.label}
@@ -87,40 +99,59 @@ function DetectionTableComponent({ detections, variant = "full", sortKey, sortDi
                 No detection records yet. New detections will appear here as they arrive.
               </td>
             </tr>
-          ) : detections.map((d) => (
-            <tr
-              key={d.id}
-              onClick={onSelect ? () => onSelect(d) : undefined}
-              className={cn(onSelect && "cursor-pointer", "hover:bg-subtle", highlightIds?.has(d.id) && "bg-accent-soft")}
-            >
-              <td className="px-4 py-3">
-                <VehicleThumbnail type={d.vehicleType} eventId={d.id} hasImage={d.hasVehicleImage} />
-              </td>
-              {full ? (
-                <>
-                  <td className="px-4 py-3"><Plate detection={d} /></td>
-                  <td className="px-4 py-3">{VEHICLE_TYPE_LABELS[d.vehicleType] ?? d.vehicleType}</td>
-                  <td className="px-4 py-3 text-muted">{d.cameraId}</td>
-                </>
-              ) : (
-                <>
-                  <td className="px-4 py-3">{VEHICLE_TYPE_LABELS[d.vehicleType] ?? d.vehicleType}</td>
-                  <td className="px-4 py-3"><Plate detection={d} /></td>
-                  <td className="px-4 py-3 text-muted">{d.cameraName}</td>
-                </>
-              )}
-              <td className="px-4 py-3 text-muted">{d.location}</td>
-              <td className="whitespace-nowrap px-4 py-3 text-muted">{formatDateTime(d.detectedAt)}</td>
-              <td className="px-4 py-3">{d.hasPlate ? <ConfidenceCell value={d.confidence} /> : <span className="text-xs text-muted">—</span>}</td>
-              {full && (
-                <td className="px-4 py-3 text-right">
-                  <Button variant="ghost" size="sm" icon={faEye} aria-label={`View details for ${d.plate || "detection " + d.id}`} onClick={() => onSelect?.(d)}>
-                    View
-                  </Button>
-                </td>
-              )}
-            </tr>
-          ))}
+          ) : (
+            detections.map((d) => {
+              const hasRealLocation = Boolean(d.location && d.location !== "Location unavailable");
+              return (
+                <tr
+                  key={d.id}
+                  onClick={onSelect ? () => onSelect(d) : undefined}
+                  className={cn(onSelect && "cursor-pointer", "hover:bg-subtle", highlightIds?.has(d.id) && "bg-accent-soft")}
+                >
+                  <td className={cellPad}>
+                    <VehicleThumbnail type={d.vehicleType} eventId={d.id} hasImage={d.hasVehicleImage} />
+                  </td>
+                  {full ? (
+                    <>
+                      <td className={cellPad}><Plate detection={d} /></td>
+                      <td className={cellPad}>{VEHICLE_TYPE_LABELS[d.vehicleType] ?? d.vehicleType}</td>
+                      <td className={cn(cellPad, "text-muted")}>{d.cameraId}</td>
+                      <td className={cn(cellPad, "max-w-48 truncate text-muted")}>{hasRealLocation ? d.location : "—"}</td>
+                      <td className={cn(cellPad, "whitespace-nowrap text-muted")}>{formatDateTime(d.detectedAt)}</td>
+                      <td className={cellPad}>{d.hasPlate ? <ConfidenceCell value={d.confidence} /> : <span className="text-xs text-muted">—</span>}</td>
+                      <td className={cn(cellPad, "text-right")}>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          icon={faEye}
+                          aria-label={`View details for ${d.plate || "detection " + d.id}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onSelect?.(d);
+                          }}
+                        >
+                          View
+                        </Button>
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td className={cn(cellPad, "whitespace-nowrap")}>{VEHICLE_TYPE_LABELS[d.vehicleType] ?? d.vehicleType}</td>
+                      <td className={cellPad}><Plate detection={d} /></td>
+                      <td className={cn(cellPad, "max-w-36 truncate text-muted")}>
+                        <span className="block truncate text-fg">{d.cameraName}</span>
+                        {hasRealLocation && <span className="block truncate text-xs text-muted">{d.location}</span>}
+                      </td>
+                      <td className={cn(cellPad, "whitespace-nowrap text-xs text-muted")}>{formatDateTime(d.detectedAt)}</td>
+                      <td className={cn(cellPad, "whitespace-nowrap text-right")}>
+                        {d.hasPlate ? <ConfidenceCell value={d.confidence} /> : <span className="text-xs text-muted">—</span>}
+                      </td>
+                    </>
+                  )}
+                </tr>
+              );
+            })
+          )}
         </tbody>
       </table>
     </div>

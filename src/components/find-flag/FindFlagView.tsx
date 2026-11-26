@@ -193,7 +193,7 @@ export function FindFlagView({ filters, vehicles, selected, sightings, cameraBre
                       eventId={selected.latestEventId}
                       hasImage={selected.hasVehicleImage}
                       kind="vehicle"
-                      className="aspect-video h-auto w-full rounded-md text-2xl"
+                      natural
                     />
                   </div>
                   <div className="space-y-1.5">
@@ -203,8 +203,8 @@ export function FindFlagView({ filters, vehicles, selected, sightings, cameraBre
                       eventId={selected.latestEventId}
                       hasImage={selected.hasPlateImage}
                       kind="plate"
+                      natural
                       alt={`Plate ${selected.plate} snapshot`}
-                      className="aspect-video h-auto w-full rounded-md text-2xl"
                     />
                   </div>
                 </div>

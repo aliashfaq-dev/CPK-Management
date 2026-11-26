@@ -1,5 +1,7 @@
 "use client";
 
+import { faUpRightFromSquare } from "@fortawesome/free-solid-svg-icons";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { Drawer } from "@/components/ui/Drawer";
 import type { Detection } from "@/types";
 import { VEHICLE_TYPE_LABELS } from "@/lib/constants";
@@ -21,18 +23,31 @@ export function DetectionDetailDrawer({ detection, onClose }: DetectionDetailDra
       {detection && (
         <div className="space-y-5">
           <div className="space-y-2">
-            <span className="block text-xs font-medium text-muted">Vehicle snapshot</span>
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-muted">Vehicle snapshot</span>
+              {detection.hasVehicleImage && (
+                <a
+                  href={`/api/images/${encodeURIComponent(detection.id)}/vehicle`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-xs font-medium text-accent hover:underline"
+                >
+                  Full resolution
+                  <FontAwesomeIcon icon={faUpRightFromSquare} className="text-[10px]" />
+                </a>
+              )}
+            </div>
             <VehicleThumbnail
               type={detection.vehicleType}
               eventId={detection.id}
               hasImage={detection.hasVehicleImage}
               kind="vehicle"
-              className="aspect-video h-auto w-full rounded-md text-3xl"
+              natural
             />
           </div>
 
           <div className="rounded-md border border-line bg-subtle p-3">
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <span className="block text-xs text-muted">License plate</span>
                 <div className="mt-1">
@@ -49,14 +64,21 @@ export function DetectionDetailDrawer({ detection, onClose }: DetectionDetailDra
                 )}
               </div>
               {detection.hasPlateImage ? (
-                <VehicleThumbnail
-                  type={detection.vehicleType}
-                  eventId={detection.id}
-                  hasImage
-                  kind="plate"
-                  alt={detection.plate ? `Plate ${detection.plate} crop` : "Plate crop"}
-                  className="h-14 w-36 rounded-md"
-                />
+                <a
+                  href={`/api/images/${encodeURIComponent(detection.id)}/plate`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="Open full-size plate crop"
+                >
+                  <VehicleThumbnail
+                    type={detection.vehicleType}
+                    eventId={detection.id}
+                    hasImage
+                    kind="plate"
+                    alt={detection.plate ? `Plate ${detection.plate} crop` : "Plate crop"}
+                    className="h-16 w-44 rounded-md"
+                  />
+                </a>
               ) : (
                 <span className="rounded border border-line bg-surface px-2.5 py-2 text-xs text-muted">
                   No plate crop
@@ -72,7 +94,7 @@ export function DetectionDetailDrawer({ detection, onClose }: DetectionDetailDra
               ["Make and model", detection.make ?? PENDING],
               ["Colour", detection.color ?? PENDING],
               ["Camera", `${detection.cameraId} · ${detection.cameraName}`],
-              ["Location", detection.location],
+              ["Location", detection.location === "Location unavailable" ? "—" : detection.location],
               ["Detected at", `${formatDateTime(detection.detectedAt)} UTC`],
             ].map(([label, value]) => (
               <div key={label} className="flex justify-between gap-4 py-2.5">
