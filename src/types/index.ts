@@ -1,4 +1,5 @@
-export type VehicleType = "Car" | "Motorcycle" | "Truck" | "Bus";
+/** The six vehicle classes the detection pipeline emits. "other" is never produced. */
+export type VehicleType = "car" | "rickshaw" | "htv" | "van" | "pickup" | "bike";
 export type CameraStatus = "online" | "offline" | "warning";
 export type DateRangeKey = "today" | "7d" | "30d" | "custom";
 export type SortDirection = "asc" | "desc";
@@ -9,27 +10,45 @@ export type DetectionSortKey =
   | "detectedAt"
   | "confidence";
 
+/** A vehicle (grouped by normalised plate) in the Find Flag results. */
 export interface Vehicle {
   plate: string;
+  /** Normalised plate (uppercase A-Z0-9), the grouping key. */
+  plateNorm: string;
   type: VehicleType;
-  make: string;
-  color: string;
+  /** Make and model from the stage-2 analysis, or null until it has run. */
+  make: string | null;
+  color: string | null;
   totalSightings: number;
   firstSeen: string;
   lastSeen: string;
+  /** Most recent event for this plate; used for the thumbnail. */
+  latestEventId: string;
+  hasVehicleImage: boolean;
+  hasPlateImage: boolean;
 }
 
 export interface Detection {
   id: string;
+  /** Plate text as read by the pipeline; empty string when no plate was read. */
   plate: string;
+  hasPlate: boolean;
+  /** Straight from events.vehicle_type. */
   vehicleType: VehicleType;
-  make: string;
-  color: string;
+  /** Stage-2 make + model, or null until the analysis pipeline has filled `analysis`. */
+  make: string | null;
+  color: string | null;
+  analysisStatus: string | null;
   cameraId: string;
   cameraName: string;
   location: string;
   detectedAt: string;
+  /** Plate read confidence, 0-100. */
   confidence: number;
+  /** Plate detector confidence, 0-100, or null. */
+  plateDetectionConfidence: number | null;
+  hasVehicleImage: boolean;
+  hasPlateImage: boolean;
 }
 
 export interface Camera {
@@ -38,34 +57,43 @@ export interface Camera {
   location: string;
   status: CameraStatus;
   lastActivity: string;
-  resolution: string;
-  fps: number;
   detectionsToday: number;
-  /** Optional progressive video URL (mp4/webm). Leave undefined while feeds are placeholders. */
+  /** Placeholder metadata for the live-camera tiles (replaced by pipeline status in a later phase). */
+  resolution?: string;
+  fps?: number;
+  /** Progressive video URL used only when no pipeline is configured. */
   streamUrl?: string;
+  /** Pipeline stream id attached to this camera, if any. */
+  streamId?: string;
 }
 
+export type UserRole = "admin" | "viewer";
+
+/** The signed-in user as seen by the UI. */
 export interface User {
   id: string;
   name: string;
   email: string;
-  role: string;
+  role: UserRole;
   initials: string;
 }
 
 export interface DetectionStatistics {
   totalVehicles: number;
-  totalChange: number;
   todayVehicles: number;
-  todayChange: number;
+  /** Percent change vs the same elapsed time yesterday; null when yesterday had no data. */
+  todayChange: number | null;
   activeCameras: number;
   totalCameras: number;
-  activeCamerasChange: number;
+  /** Average plate confidence over the last 7 days (0-100). */
   accuracy: number;
-  accuracyChange: number;
+  /** Difference in points vs the 7 days before; null when there is no earlier data. */
+  accuracyChange: number | null;
 }
 
 export interface TimeSeriesPoint {
+  /** Optional stable bucket key (e.g. ISO hour `2026-11-26T09`) used for live increments. */
+  key?: string;
   label: string;
   detections: number;
 }
@@ -79,7 +107,9 @@ export interface CameraPerformance {
   cameraId: string;
   name: string;
   detections: number;
-  uptime: number;
+  /** Share of events where a plate was read, 0-100. */
+  plateRate: number;
+  /** Average plate confidence, 0-100. */
   accuracy: number;
 }
 
@@ -95,6 +125,7 @@ export interface AnalyticsData {
   weekly: TimeSeriesPoint[];
   cameraPerformance: CameraPerformance[];
   confidence: ConfidenceBucket[];
+  total: number;
 }
 
 export interface AppNotification {
@@ -121,7 +152,7 @@ export interface AppSettings {
   profileEmail: string;
 }
 
-/** Demo-only account kept in localStorage. Not real authentication. */
+/** Demo-only account kept in localStorage. Removed in the auth phase. */
 export interface RegisteredUser {
   email: string;
   password: string;
@@ -143,4 +174,36 @@ export interface WorkspaceTab {
   cameraIds: string[];
   /** Pinned tabs (the "All cameras" home tab) cannot be closed. */
   pinned?: boolean;
+}
+
+/** Filters shared by the Detections table, CSV export, Find Flag and the assistant. */
+export interface DetectionFilters {
+  /** Substring of the plate (case, spaces and dashes ignored). */
+  plate?: string;
+  /** Exact normalised plate. */
+  plateExact?: string;
+  type?: VehicleType;
+  camera?: string;
+  /** Inclusive ISO timestamp. */
+  from?: string;
+  /** Exclusive ISO timestamp. */
+  to?: string;
+  colour?: string;
+  hasPlate?: boolean;
+  /** Minimum plate confidence, 0-100. */
+  minConfidence?: number;
+}
+
+export interface DetectionQuery extends DetectionFilters {
+  page: number;
+  pageSize: number;
+  sort: DetectionSortKey;
+  dir: SortDirection;
+}
+
+export interface Page<T> {
+  rows: T[];
+  total: number;
+  page: number;
+  pageSize: number;
 }

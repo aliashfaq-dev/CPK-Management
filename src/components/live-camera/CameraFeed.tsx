@@ -3,6 +3,7 @@ import { faPause, faVideo, faVideoSlash } from "@fortawesome/free-solid-svg-icon
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import type { Camera, Detection } from "@/types";
 import { useLiveStream } from "@/hooks/useLiveStream";
+import { VEHICLE_TYPE_LABELS } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 
 interface CameraFeedProps {
@@ -64,7 +65,7 @@ function CameraFeedComponent({ camera, detections, showOverlay, active = true, f
             style={{ left: `${left}%`, top: `${top}%`, width: `${width}%`, height: `${height}%` }}
           >
             <span className="absolute -top-5 -left-0.5 whitespace-nowrap bg-danger px-1.5 py-0.5 text-[10px] font-medium text-white">
-              {detection.vehicleType} · {detection.plate} · {detection.confidence.toFixed(0)}%
+              {VEHICLE_TYPE_LABELS[detection.vehicleType]} · {detection.plate || "no plate"} · {detection.confidence.toFixed(0)}%
             </span>
           </div>
         ))}

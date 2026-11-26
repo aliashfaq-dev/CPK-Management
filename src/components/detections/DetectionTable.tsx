@@ -5,6 +5,7 @@ import { faEye, faSort, faSortDown, faSortUp } from "@fortawesome/free-solid-svg
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import type { Detection, DetectionSortKey, SortDirection } from "@/types";
 import { Button } from "@/components/ui/Button";
+import { VEHICLE_TYPE_LABELS } from "@/lib/constants";
 import { cn, formatDateTime } from "@/lib/utils";
 import { ConfidenceCell } from "./ConfidenceCell";
 import { PlateTag } from "./PlateTag";
@@ -17,6 +18,8 @@ interface DetectionTableProps {
   sortDirection?: SortDirection;
   onSort?: (key: DetectionSortKey) => void;
   onSelect?: (detection: Detection) => void;
+  /** Ids to highlight as freshly arrived (live updates). */
+  highlightIds?: ReadonlySet<string>;
 }
 
 interface Header {
@@ -46,7 +49,11 @@ const COMPACT_HEADERS: Header[] = [
   { label: "Confidence" },
 ];
 
-function DetectionTableComponent({ detections, variant = "full", sortKey, sortDirection, onSort, onSelect }: DetectionTableProps) {
+function Plate({ detection }: { detection: Detection }) {
+  return detection.hasPlate && detection.plate ? <PlateTag plate={detection.plate} /> : <span className="text-xs text-muted">No plate read</span>;
+}
+
+function DetectionTableComponent({ detections, variant = "full", sortKey, sortDirection, onSort, onSelect, highlightIds }: DetectionTableProps) {
   const full = variant === "full";
   const headers = full ? FULL_HEADERS : COMPACT_HEADERS;
 
@@ -77,37 +84,37 @@ function DetectionTableComponent({ detections, variant = "full", sortKey, sortDi
           {detections.length === 0 ? (
             <tr>
               <td colSpan={headers.length} className="px-4 py-10 text-center text-sm text-muted">
-                No detection records in the database yet. New detections will appear automatically.
+                No detection records yet. New detections will appear here as they arrive.
               </td>
             </tr>
           ) : detections.map((d) => (
             <tr
               key={d.id}
               onClick={onSelect ? () => onSelect(d) : undefined}
-              className={cn(onSelect && "cursor-pointer", "hover:bg-subtle")}
+              className={cn(onSelect && "cursor-pointer", "hover:bg-subtle", highlightIds?.has(d.id) && "bg-accent-soft")}
             >
               <td className="px-4 py-3">
-                <VehicleThumbnail type={d.vehicleType} />
+                <VehicleThumbnail type={d.vehicleType} eventId={d.id} hasImage={d.hasVehicleImage} />
               </td>
               {full ? (
                 <>
-                  <td className="px-4 py-3"><PlateTag plate={d.plate} /></td>
-                  <td className="px-4 py-3">{d.vehicleType}</td>
+                  <td className="px-4 py-3"><Plate detection={d} /></td>
+                  <td className="px-4 py-3">{VEHICLE_TYPE_LABELS[d.vehicleType] ?? d.vehicleType}</td>
                   <td className="px-4 py-3 text-muted">{d.cameraId}</td>
                 </>
               ) : (
                 <>
-                  <td className="px-4 py-3">{d.vehicleType}</td>
-                  <td className="px-4 py-3"><PlateTag plate={d.plate} /></td>
+                  <td className="px-4 py-3">{VEHICLE_TYPE_LABELS[d.vehicleType] ?? d.vehicleType}</td>
+                  <td className="px-4 py-3"><Plate detection={d} /></td>
                   <td className="px-4 py-3 text-muted">{d.cameraName}</td>
                 </>
               )}
               <td className="px-4 py-3 text-muted">{d.location}</td>
               <td className="whitespace-nowrap px-4 py-3 text-muted">{formatDateTime(d.detectedAt)}</td>
-              <td className="px-4 py-3"><ConfidenceCell value={d.confidence} /></td>
+              <td className="px-4 py-3">{d.hasPlate ? <ConfidenceCell value={d.confidence} /> : <span className="text-xs text-muted">—</span>}</td>
               {full && (
                 <td className="px-4 py-3 text-right">
-                  <Button variant="ghost" size="sm" icon={faEye} aria-label={`View details for ${d.plate}`} onClick={() => onSelect?.(d)}>
+                  <Button variant="ghost" size="sm" icon={faEye} aria-label={`View details for ${d.plate || "detection " + d.id}`} onClick={() => onSelect?.(d)}>
                     View
                   </Button>
                 </td>

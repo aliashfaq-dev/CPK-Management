@@ -21,12 +21,13 @@ import {
   faXmark,
 } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import type { Camera, Detection } from "@/types";
+import type { Detection } from "@/types";
 import { ConfidenceCell } from "@/components/detections/ConfidenceCell";
 import { PlateTag } from "@/components/detections/PlateTag";
 import { VehicleThumbnail } from "@/components/detections/VehicleThumbnail";
 import { askAssistant } from "@/lib/assistant";
-import { cn, formatDateTime } from "@/lib/utils";
+import { VEHICLE_TYPE_LABELS } from "@/lib/constants";
+import { cn, formatDateTime, vehicleDescription } from "@/lib/utils";
 import { Button } from "./Button";
 import { Card } from "./Card";
 
@@ -48,8 +49,6 @@ interface Message {
 }
 
 interface AssistantChatProps {
-  detections: Detection[];
-  cameras: Camera[];
   title?: string;
   description?: string;
   className?: string;
@@ -120,15 +119,15 @@ const MessageItem = memo(function MessageItem({ message }: { message: Message })
         <ul className="divide-y divide-line overflow-hidden rounded-lg border border-line bg-surface">
           {message.results.map((d) => (
             <li key={d.id}>
-              <Link href={`/detections?q=${encodeURIComponent(d.plate)}`} className="flex items-center gap-3 px-4 py-3 hover:bg-subtle">
-                <VehicleThumbnail type={d.vehicleType} />
+              <Link href={d.plate ? `/detections?q=${encodeURIComponent(d.plate)}` : "/detections"} className="flex items-center gap-3 px-4 py-3 hover:bg-subtle">
+                <VehicleThumbnail type={d.vehicleType} eventId={d.id} hasImage={d.hasVehicleImage} />
                 <span className="min-w-0 flex-1">
-                  <PlateTag plate={d.plate} />
+                  {d.plate ? <PlateTag plate={d.plate} /> : <span className="text-xs text-muted">No plate read</span>}
                   <span className="mt-1 block truncate text-xs text-muted">
-                    {d.color} {d.make} · {d.cameraName} · {formatDateTime(d.detectedAt)}
+                    {VEHICLE_TYPE_LABELS[d.vehicleType]} · {vehicleDescription(d.color, d.make)} · {d.cameraName} · {formatDateTime(d.detectedAt)}
                   </span>
                 </span>
-                <ConfidenceCell value={d.confidence} />
+                {d.hasPlate && <ConfidenceCell value={d.confidence} />}
               </Link>
             </li>
           ))}
@@ -148,8 +147,6 @@ export function AssistantChat({
   title = "Ask the CPK assistant",
   description = "Describe what you are looking for in English or Roman Urdu: a plate, vehicle type, color, camera, or time. You can also attach pictures or videos.",
   className,
-  detections,
-  cameras,
 }: AssistantChatProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -265,15 +262,15 @@ export function AssistantChat({
         ]);
         return;
       }
-      const reply = await askAssistant(query, detections, cameras);
+      const reply = await askAssistant(query);
       setMessages((current) => [
         ...current,
         { id: nextId.current++, role: "assistant", ...reply, text: mediaNote ? `${reply.text} ${mediaNote}` : reply.text },
       ]);
-    } catch {
+    } catch (error) {
       setMessages((current) => [
         ...current,
-        { id: nextId.current++, role: "assistant", text: "The search failed. Check your connection and send the question again." },
+        { id: nextId.current++, role: "assistant", text: error instanceof Error ? error.message : "The search failed. Check your connection and send the question again." },
       ]);
     } finally {
       setPending(false);

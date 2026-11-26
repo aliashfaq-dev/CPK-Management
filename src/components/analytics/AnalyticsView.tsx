@@ -8,13 +8,13 @@ import { Card } from "@/components/ui/Card";
 import { ChartCard } from "@/components/ui/ChartCard";
 import { ChartTooltip } from "@/components/ui/ChartTooltip";
 import { DateRangeFilter } from "@/components/ui/DateRangeFilter";
-import { LoadingState } from "@/components/ui/LoadingState";
-import { CHART_COLORS, VEHICLE_TYPE_COLORS, VEHICLE_TYPE_ICONS } from "@/lib/constants";
+import { CHART_COLORS, VEHICLE_TYPE_COLORS, VEHICLE_TYPE_ICONS, VEHICLE_TYPE_LABELS } from "@/lib/constants";
 import { formatNumber } from "@/lib/utils";
 
 const RANGE_DAYS: Record<Exclude<DateRangeKey, "custom">, number> = { today: 1, "7d": 7, "30d": 30 };
 const tick = { fill: CHART_COLORS.axis, fontSize: 12 };
 const margin = { top: 4, right: 8, bottom: 0, left: -16 };
+const INITIAL_KEY = "days=7";
 
 function daysBetween(from: string, to: string): number {
   const days = Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000) + 1;
@@ -41,54 +41,72 @@ function ChartBox({ children }: { children: ReactElement }) {
   );
 }
 
+function isoDay(offsetDays = 0): string {
+  return new Date(Date.now() + offsetDays * 86_400_000).toISOString().slice(0, 10);
+}
+
+/** `initialData` covers the default range (last 7 days); other ranges are aggregated on the server. */
 export function AnalyticsView({ initialData }: { initialData: AnalyticsData }) {
   const [range, setRange] = useState<DateRangeKey>("7d");
-  const [from, setFrom] = useState("2026-11-10");
-  const [to, setTo] = useState("2026-11-22");
-  const [result, setResult] = useState<{ days: number; data: AnalyticsData }>({ days: 90, data: initialData });
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [result, setResult] = useState<{ key: string; data: AnalyticsData }>({ key: INITIAL_KEY, data: initialData });
+  const [failed, setFailed] = useState(false);
 
+  const customReady = range !== "custom" || (from !== "" && to !== "" && from <= to);
   const days = range === "custom" ? daysBetween(from, to) : RANGE_DAYS[range];
+  const key = range === "custom" ? `from=${from}&to=${to}` : `days=${RANGE_DAYS[range]}`;
 
   useEffect(() => {
-    setResult({ days: 90, data: initialData });
-  }, [initialData]);
+    if (!customReady || key === result.key) return;
+    const controller = new AbortController();
+    setFailed(false);
+    fetch(`/api/analytics?${key}`, { signal: controller.signal })
+      .then((response) => (response.ok ? (response.json() as Promise<AnalyticsData>) : Promise.reject(new Error("failed"))))
+      .then((data) => setResult({ key, data }))
+      .catch((error: unknown) => {
+        if (!(error instanceof DOMException && error.name === "AbortError")) setFailed(true);
+      });
+    return () => controller.abort();
+  }, [key, customReady, result.key]);
 
-  const data = result.data ? {
-    ...result.data,
-    trend: days === 1 ? result.data.hourly : result.data.trend.slice(-days),
-  } : null;
+  const changeRange = (next: DateRangeKey) => {
+    if (next === "custom" && (!from || !to)) {
+      setFrom(isoDay(-6));
+      setTo(isoDay());
+    }
+    setRange(next);
+  };
+
+  const data = result.data;
+  const loading = customReady && key !== result.key && !failed;
 
   const filter = (
     <div className="mb-6">
-      <DateRangeFilter value={range} onChange={setRange} from={from} to={to} onCustomChange={(f, t) => { setFrom(f); setTo(t); }} />
+      <DateRangeFilter value={range} onChange={changeRange} from={from} to={to} onCustomChange={(f, t) => { setFrom(f); setTo(t); }} />
+      {failed && <p role="alert" className="mt-3 text-sm text-danger-strong">Could not load analytics for this range. Try again.</p>}
+      {!customReady && <p className="mt-3 text-sm text-muted">Choose a start date that is not after the end date.</p>}
     </div>
   );
 
-  if (!data) {
-    return (
-      <>
-        {filter}
-        <LoadingState label="Loading analytics…" />
-      </>
-    );
-  }
-
-  const total = data.trend.reduce((sum, point) => sum + point.detections, 0);
+  const total = data.total;
   const peak = data.hourly.reduce((best, point) => (point.detections > best.detections ? point : best), { label: "—", detections: 0 });
-  const topType = data.distribution.reduce((best, item) => (item.value > best.value ? item : best), { name: "Car" as VehicleType, value: 0 });
-  const avgAccuracy = data.cameraPerformance.length ? data.cameraPerformance.reduce((sum, c) => sum + c.accuracy, 0) / data.cameraPerformance.length : 0;
+  const topType = data.distribution.reduce((best, item) => (item.value > best.value ? item : best), { name: "car" as VehicleType, value: 0 });
+  const measured = data.cameraPerformance.filter((c) => c.detections > 0);
+  const weighted = measured.reduce((sum, c) => sum + c.detections, 0);
+  const avgAccuracy = weighted ? measured.reduce((sum, c) => sum + c.accuracy * c.detections, 0) / weighted : 0;
   const distributionTotal = data.distribution.reduce((sum, item) => sum + item.value, 0);
   const activeCameras = [...data.cameraPerformance].sort((a, b) => b.detections - a.detections).slice(0, 5);
 
   return (
-    <>
+    <div className={loading ? "opacity-60 transition-opacity" : "transition-opacity"} aria-busy={loading}>
       {filter}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Metric label="Total detections" value={formatNumber(total)} note={days === 1 ? "Last 24 hours" : `Last ${days} days`} />
-        <Metric label="Peak hour" value={peak.label} note={`${peak.detections} detections on average`} />
-        <Metric label="Top vehicle type" value={topType.name} note={`${distributionTotal ? Math.round((topType.value / distributionTotal) * 100) : 0}% of detections`} />
-        <Metric label="Average accuracy" value={`${avgAccuracy.toFixed(1)}%`} note="Across all cameras" />
+        <Metric label="Total detections" value={formatNumber(total)} note={days === 1 ? "Today (UTC)" : `Last ${days} days`} />
+        <Metric label="Peak hour" value={peak.detections ? peak.label : "—"} note={`${peak.detections} detections in this period`} />
+        <Metric label="Top vehicle type" value={topType.value ? VEHICLE_TYPE_LABELS[topType.name] : "—"} note={`${distributionTotal ? Math.round((topType.value / distributionTotal) * 100) : 0}% of detections`} />
+        <Metric label="Average plate confidence" value={`${avgAccuracy.toFixed(1)}%`} note="Weighted across cameras" />
       </div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-3">
@@ -121,7 +139,7 @@ export function AnalyticsView({ initialData }: { initialData: AnalyticsData }) {
             {data.distribution.map((item) => (
               <li key={item.name} className="flex items-center gap-2">
                 <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: VEHICLE_TYPE_COLORS[item.name] }} aria-hidden="true" />
-                <span className="text-muted">{item.name}</span>
+                <span className="text-muted">{VEHICLE_TYPE_LABELS[item.name]}</span>
                 <span className="ml-auto font-medium tabular-nums">{distributionTotal ? Math.round((item.value / distributionTotal) * 100) : 0}%</span>
               </li>
             ))}
@@ -176,17 +194,17 @@ export function AnalyticsView({ initialData }: { initialData: AnalyticsData }) {
           <BarList
             items={[...data.distribution]
               .sort((a, b) => b.value - a.value)
-              .map((item) => ({ label: item.name, value: item.value, icon: VEHICLE_TYPE_ICONS[item.name], hint: `${distributionTotal ? Math.round((item.value / distributionTotal) * 100) : 0}%` }))}
+              .map((item) => ({ label: VEHICLE_TYPE_LABELS[item.name], value: item.value, icon: VEHICLE_TYPE_ICONS[item.name], hint: `${distributionTotal ? Math.round((item.value / distributionTotal) * 100) : 0}%` }))}
           />
         </ChartCard>
       </div>
 
-      <ChartCard className="mt-4" title="Camera performance" description="Detections, uptime, and accuracy per camera" bodyClassName="p-0">
+      <ChartCard className="mt-4" title="Camera performance" description="Detections, plate read rate, and confidence per camera" bodyClassName="p-0">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[560px] text-left text-sm">
             <thead>
               <tr className="border-b border-line bg-subtle text-xs text-muted">
-                {["Camera", "Detections", "Uptime", "Accuracy"].map((label) => (
+                {["Camera", "Detections", "Plate read rate", "Avg plate confidence"].map((label) => (
                   <th key={label} scope="col" className="px-5 py-3 font-medium">
                     {label}
                   </th>
@@ -200,14 +218,14 @@ export function AnalyticsView({ initialData }: { initialData: AnalyticsData }) {
                     <span className="font-medium">{c.name}</span> <span className="text-xs text-muted">{c.cameraId}</span>
                   </td>
                   <td className="px-5 py-3 tabular-nums">{formatNumber(c.detections)}</td>
-                  <td className="px-5 py-3 tabular-nums">{c.uptime.toFixed(1)}%</td>
-                  <td className="px-5 py-3 tabular-nums">{c.accuracy.toFixed(1)}%</td>
+                  <td className="px-5 py-3 tabular-nums">{c.detections ? `${c.plateRate.toFixed(1)}%` : "—"}</td>
+                  <td className="px-5 py-3 tabular-nums">{c.detections ? `${c.accuracy.toFixed(1)}%` : "—"}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </ChartCard>
-    </>
+    </div>
   );
 }

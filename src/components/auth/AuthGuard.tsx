@@ -33,7 +33,16 @@ export function AuthGuard({ children, fallbackUser, notifications }: AuthGuardPr
   }, [status, router]);
 
   const user = useMemo<User>(
-    () => (session ? { ...fallbackUser, name: session.name, email: session.email, role: session.role, initials: initialsOf(session.name) } : fallbackUser),
+    () =>
+      session
+        ? {
+            ...fallbackUser,
+            name: session.name,
+            email: session.email,
+            role: session.role === "viewer" ? "viewer" : "admin",
+            initials: initialsOf(session.name),
+          }
+        : fallbackUser,
     [session, fallbackUser],
   );
 

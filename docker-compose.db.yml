@@ -1,0 +1,23 @@
+# Local Postgres for development / on-premise production.
+#   docker compose -f docker-compose.db.yml up -d
+# On first start the pipeline schema and the frontend objects are applied in order.
+# Then set DATABASE_URL=postgres://cpk:cpk_local_password@127.0.0.1:5432/cpk in .env.local
+# (no sslmode, so TLS stays off). Change the password for anything beyond a dev machine.
+# If the pipeline creates its own schema, drop the 01- mount and keep only 02-.
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cpk
+      POSTGRES_PASSWORD: cpk_local_password
+      POSTGRES_DB: cpk
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - cpk-db-data:/var/lib/postgresql/data
+      - ./sql/pipeline-schema.sql:/docker-entrypoint-initdb.d/01-pipeline-schema.sql:ro
+      - ./sql/frontend.sql:/docker-entrypoint-initdb.d/02-frontend.sql:ro
+
+volumes:
+  cpk-db-data:

@@ -1,21 +1,15 @@
 import { NextResponse } from "next/server";
-import { sql } from "@/lib/db";
+import { query } from "@/lib/db";
 
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/** Connectivity probe only: returns ok/error, never schema, rows, or connection details. */
 export async function GET() {
   try {
-    const result = await sql`SELECT 1 AS connected`;
-    return NextResponse.json({
-      success: result[0]?.connected === 1,
-      database: "connected",
-      checkedAt: new Date().toISOString(),
-    });
-  } catch (error) {
-    console.error("Database health check failed:", error);
-    return NextResponse.json(
-      { success: false, database: "unavailable" },
-      { status: 503 },
-    );
+    await query("SELECT 1");
+    return NextResponse.json({ ok: true });
+  } catch {
+    return NextResponse.json({ ok: false, error: "Database connection failed." }, { status: 503 });
   }
 }

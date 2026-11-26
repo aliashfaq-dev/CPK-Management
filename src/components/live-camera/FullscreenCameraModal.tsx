@@ -18,7 +18,7 @@ export function FullscreenCameraModal({ camera, detections, showOverlay, onClose
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold">{camera.name}</p>
           <p className="truncate text-xs text-white/60">
-            {camera.id} · {camera.location} · {camera.resolution}
+            {camera.id} · {camera.location}{camera.resolution ? ` · ${camera.resolution}` : ""}
           </p>
         </div>
         <Button variant="secondary" onClick={onClose}>

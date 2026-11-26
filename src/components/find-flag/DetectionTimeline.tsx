@@ -5,6 +5,7 @@ import { formatDateTime } from "@/lib/utils";
 export function DetectionTimeline({ detections }: { detections: Detection[] }) {
   return (
     <ol className="relative space-y-5 border-l border-line pl-6">
+      {detections.length === 0 && <li className="text-sm text-muted">No detections match the current filters.</li>}
       {detections.map((d) => (
         <li key={d.id} className="relative">
           <span className="absolute -left-[29px] top-1.5 h-2.5 w-2.5 rounded-full border-2 border-surface bg-accent" aria-hidden="true" />

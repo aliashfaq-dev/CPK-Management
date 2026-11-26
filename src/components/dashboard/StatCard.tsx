@@ -1,19 +1,25 @@
 import type { IconDefinition } from "@fortawesome/fontawesome-svg-core";
-import { faArrowDown, faArrowUp } from "@fortawesome/free-solid-svg-icons";
+import { faArrowDown, faArrowUp, faMinus } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { Card } from "@/components/ui/Card";
 import { cn } from "@/lib/utils";
+
+export interface StatChange {
+  text: string;
+  trend: "up" | "down" | "flat";
+}
 
 interface StatCardProps {
   label: string;
   value: string;
   icon: IconDefinition;
-  change: string;
-  trend: "up" | "down";
-  comparison: string;
+  /** Only pass a real comparison; omit it when there is nothing to compare against. */
+  change?: StatChange;
+  comparison?: string;
+  note?: string;
 }
 
-export function StatCard({ label, value, icon, change, trend, comparison }: StatCardProps) {
+export function StatCard({ label, value, icon, change, comparison, note }: StatCardProps) {
   return (
     <Card className="p-5">
       <div className="flex items-start justify-between">
@@ -26,11 +32,22 @@ export function StatCard({ label, value, icon, change, trend, comparison }: Stat
         </span>
       </div>
       <p className="mt-4 flex items-center gap-1.5 text-xs">
-        <span className={cn("inline-flex items-center gap-1 font-medium", trend === "up" ? "text-success-strong" : "text-danger-strong")}>
-          <FontAwesomeIcon icon={trend === "up" ? faArrowUp : faArrowDown} className="text-[10px]" />
-          {change}
-        </span>
-        <span className="text-muted">{comparison}</span>
+        {change ? (
+          <>
+            <span
+              className={cn(
+                "inline-flex items-center gap-1 font-medium",
+                change.trend === "up" ? "text-success-strong" : change.trend === "down" ? "text-danger-strong" : "text-muted",
+              )}
+            >
+              <FontAwesomeIcon icon={change.trend === "up" ? faArrowUp : change.trend === "down" ? faArrowDown : faMinus} className="text-[10px]" />
+              {change.text}
+            </span>
+            <span className="text-muted">{comparison}</span>
+          </>
+        ) : (
+          <span className="text-muted">{note ?? "No earlier data to compare"}</span>
+        )}
       </p>
     </Card>
   );
