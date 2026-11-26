@@ -11,7 +11,10 @@ const HEARTBEAT_MS = 15_000;
 const MAX_DEDUPE_IDS = 500;
 
 function pipelineWsUrl(streamId: string | null): string | null {
-  const base = process.env.PIPELINE_URL?.trim();
+  const port = process.env.SERVICE_PORT?.trim();
+  const base =
+    process.env.PIPELINE_URL?.trim() ||
+    (port && /^\d+$/.test(port) ? `http://127.0.0.1:${port}` : "");
   if (!base) return null;
   let parsed: URL;
   try {
@@ -23,7 +26,7 @@ function pipelineWsUrl(streamId: string | null): string | null {
   parsed.pathname = `${parsed.pathname.replace(/\/$/, "")}/ws/events`;
   parsed.search = "";
   if (streamId) parsed.searchParams.set("stream_id", streamId);
-  const token = process.env.PIPELINE_TOKEN?.trim();
+  const token = process.env.PIPELINE_TOKEN?.trim() || process.env.SERVICE_TOKEN?.trim();
   if (token) parsed.searchParams.set("token", token);
   return parsed.toString();
 }

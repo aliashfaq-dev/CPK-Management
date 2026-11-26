@@ -48,7 +48,12 @@ function getHub(): LiveHubState {
 }
 
 function directDatabaseUrl(): string | null {
-  return process.env.DATABASE_URL_DIRECT?.trim() || process.env.DATABASE_URL?.trim() || null;
+  return (
+    process.env.DATABASE_URL_DIRECT?.trim() ||
+    process.env.DATABASE_URL_UNPOOLED?.trim() ||
+    process.env.DATABASE_URL?.trim() ||
+    null
+  );
 }
 
 function emit(hub: LiveHubState, message: LiveBroadcast): void {

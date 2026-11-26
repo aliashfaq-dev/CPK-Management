@@ -21,7 +21,7 @@ function loadEnvFile(name) {
 loadEnvFile(".env.local");
 loadEnvFile(".env");
 
-const raw = process.env.DATABASE_URL_DIRECT || process.env.DATABASE_URL;
+const raw = process.env.DATABASE_URL_DIRECT || process.env.DATABASE_URL_UNPOOLED || process.env.DATABASE_URL;
 if (!raw) {
   console.error("DATABASE_URL is not set. Copy .env.local.example to .env.local and fill it in.");
   process.exit(1);

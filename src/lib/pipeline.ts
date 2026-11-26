@@ -66,13 +66,19 @@ export class PipelineError extends Error {
   }
 }
 
-/** True only when PIPELINE_URL is explicitly set in the server environment. */
+/** True when PIPELINE_URL or SERVICE_PORT is set in the server environment. */
 export function isPipelineConfigured(): boolean {
-  return Boolean(process.env.PIPELINE_URL?.trim());
+  return Boolean(process.env.PIPELINE_URL?.trim() || process.env.SERVICE_PORT?.trim());
+}
+
+function pipelineAuthToken(): string | undefined {
+  return process.env.PIPELINE_TOKEN?.trim() || process.env.SERVICE_TOKEN?.trim() || undefined;
 }
 
 function resolvePipelineBaseUrl(): string {
-  const raw = process.env.PIPELINE_URL?.trim() || DEFAULT_PIPELINE_URL;
+  const port = process.env.SERVICE_PORT?.trim();
+  const fallback = port && /^\d+$/.test(port) ? `http://127.0.0.1:${port}` : DEFAULT_PIPELINE_URL;
+  const raw = process.env.PIPELINE_URL?.trim() || fallback;
   let parsed: URL;
   try {
     parsed = new URL(raw);
@@ -148,7 +154,7 @@ export function sanitizeStream(raw: unknown): PipelineStream | null {
 export async function pipelineFetch<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {
   const base = resolvePipelineBaseUrl();
   const headers = new Headers(init.headers);
-  const token = process.env.PIPELINE_TOKEN?.trim();
+  const token = pipelineAuthToken();
   if (token) {
     headers.set("X-API-KEY", token);
   }
@@ -246,7 +252,7 @@ export function buildFramesWsUrl(streamId: string): string {
   parsed.protocol = parsed.protocol === "https:" ? "wss:" : "ws:";
   parsed.pathname = `${parsed.pathname.replace(/\/$/, "")}/ws/frames/${encodeURIComponent(streamId)}`;
   parsed.search = "";
-  const token = process.env.PIPELINE_TOKEN?.trim();
+  const token = pipelineAuthToken();
   if (token) {
     parsed.searchParams.set("token", token);
   }

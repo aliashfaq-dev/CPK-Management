@@ -1,8 +1,6 @@
--- REFERENCE COPY of the detection pipeline's sql/schema.sql.
--- NOTE: this file was reconstructed from the column list in the project brief, not copied from
--- the pipeline repository. Before relying on it, replace it with the real sql/schema.sql from the
--- pipeline (the pipeline remains the source of truth). Column types here are best guesses.
--- Used only to bootstrap a local Docker Postgres (docker-compose.db.yml); never run on Neon.
+-- Reference copy of the detection pipeline's PostgreSQL schema (`cameras`, `runs`, `events`),
+-- aligned with the live database column types. Used only to bootstrap local Docker Postgres
+-- (`docker-compose.db.yml`); `sql/frontend.sql` never alters or drops these tables.
 
 CREATE TABLE IF NOT EXISTS public.cameras (
   camera_id  text PRIMARY KEY,
@@ -17,28 +15,28 @@ CREATE TABLE IF NOT EXISTS public.runs (
   run_id         text PRIMARY KEY,
   camera_id      text REFERENCES public.cameras (camera_id),
   source         text,
-  started_at     timestamptz,
+  started_at     timestamptz NOT NULL DEFAULT now(),
   finished_at    timestamptz,
-  frames         bigint,
-  fps            double precision,
-  tracks_seen    bigint,
-  events_emitted bigint,
-  status         text
+  frames         integer,
+  fps            real,
+  tracks_seen    integer,
+  events_emitted integer,
+  status         text NOT NULL DEFAULT 'running'
 );
 
 CREATE TABLE IF NOT EXISTS public.events (
   event_id                   text PRIMARY KEY,
-  camera_id                  text,
-  event_time                 timestamptz,
-  event_date                 date,
-  snapshot_vehicle           text,
+  camera_id                  text NOT NULL,
+  event_time                 timestamptz NOT NULL DEFAULT now(),
+  event_date                 date NOT NULL DEFAULT CURRENT_DATE,
+  snapshot_vehicle           text NOT NULL DEFAULT '',
   snapshot_number_plate      text,
-  plate_detection_confidence double precision,
+  plate_detection_confidence real,
   number_plate               text,
-  number_plate_confidence    double precision,
+  number_plate_confidence    real,
   vehicle_type               text NOT NULL
     CHECK (vehicle_type IN ('car', 'rickshaw', 'htv', 'van', 'pickup', 'bike')),
-  analysis_status            text,
+  analysis_status            text NOT NULL DEFAULT 'pending',
   analysis                   jsonb,
   analysis_updated_at        timestamptz,
   created_at                 timestamptz NOT NULL DEFAULT now(),
