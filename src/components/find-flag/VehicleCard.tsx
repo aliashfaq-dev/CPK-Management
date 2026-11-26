@@ -22,7 +22,13 @@ function VehicleCardComponent({ vehicle, selected, onSelect }: VehicleCardProps)
         selected ? "border-accent bg-accent-soft" : "border-line hover:bg-subtle",
       )}
     >
-      <VehicleThumbnail type={vehicle.type} eventId={vehicle.latestEventId} hasImage={vehicle.hasVehicleImage} className="h-11 w-14" />
+      <VehicleThumbnail
+        type={vehicle.type}
+        eventId={vehicle.latestEventId}
+        hasImage={vehicle.hasVehicleImage}
+        kind="vehicle"
+        className="h-12 w-16"
+      />
       <span className="min-w-0 flex-1">
         <span className="flex items-center justify-between gap-2">
           <PlateTag plate={vehicle.plate} />
@@ -31,6 +37,16 @@ function VehicleCardComponent({ vehicle, selected, onSelect }: VehicleCardProps)
         <span className="mt-1.5 block truncate text-sm font-medium">{vehicleDescription(vehicle.color, vehicle.make)}</span>
         <span className="block text-xs text-muted">Last seen {formatDateTime(vehicle.lastSeen)}</span>
       </span>
+      {vehicle.hasPlateImage && (
+        <VehicleThumbnail
+          type={vehicle.type}
+          eventId={vehicle.latestEventId}
+          hasImage
+          kind="plate"
+          alt={`Plate ${vehicle.plate} crop`}
+          className="hidden h-9 w-20 sm:flex"
+        />
+      )}
     </button>
   );
 }

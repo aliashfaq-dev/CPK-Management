@@ -6,6 +6,7 @@ import { faImage, faMagnifyingGlass, faRotateLeft, faUpload, faXmark } from "@fo
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import type { Camera, Detection, DetectionFilters, Page, Vehicle } from "@/types";
 import { PlateTag } from "@/components/detections/PlateTag";
+import { VehicleThumbnail } from "@/components/detections/VehicleThumbnail";
 import { Button } from "@/components/ui/Button";
 import { ChartCard } from "@/components/ui/ChartCard";
 import { Card } from "@/components/ui/Card";
@@ -184,6 +185,29 @@ export function FindFlagView({ filters, vehicles, selected, sightings, cameraBre
           {selected && (
             <div className="space-y-4 lg:col-span-2">
               <ChartCard title="Vehicle information" action={<PlateTag plate={selected.plate} />}>
+                <div className="mb-5 grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <span className="block text-xs text-muted">Latest vehicle snapshot</span>
+                    <VehicleThumbnail
+                      type={selected.type}
+                      eventId={selected.latestEventId}
+                      hasImage={selected.hasVehicleImage}
+                      kind="vehicle"
+                      className="aspect-video h-auto w-full rounded-md text-2xl"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <span className="block text-xs text-muted">Latest plate snapshot</span>
+                    <VehicleThumbnail
+                      type={selected.type}
+                      eventId={selected.latestEventId}
+                      hasImage={selected.hasPlateImage}
+                      kind="plate"
+                      alt={`Plate ${selected.plate} snapshot`}
+                      className="aspect-video h-auto w-full rounded-md text-2xl"
+                    />
+                  </div>
+                </div>
                 <dl className="grid grid-cols-2 gap-x-6 gap-y-4 text-sm sm:grid-cols-3">
                   {[
                     ["Type", VEHICLE_TYPE_LABELS[selected.type] ?? selected.type],
