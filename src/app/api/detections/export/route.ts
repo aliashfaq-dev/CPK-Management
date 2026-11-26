@@ -1,3 +1,4 @@
+import { authorize } from "@/lib/auth-server";
 import { iterateDetections } from "@/lib/data-service";
 import { parseFilters, type RawParams } from "@/lib/detection-query";
 import { VEHICLE_TYPE_LABELS } from "@/lib/constants";
@@ -16,6 +17,8 @@ function cell(value: string | number | null | undefined): string {
 
 /** Streams every detection matching the filters as CSV, one database batch at a time. */
 export async function GET(request: Request) {
+  const auth = await authorize(request);
+  if ("response" in auth) return auth.response;
   const params: RawParams = Object.fromEntries(new URL(request.url).searchParams);
   const filters = parseFilters(params);
   const encoder = new TextEncoder();

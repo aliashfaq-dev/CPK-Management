@@ -66,6 +66,4 @@ export const DEFAULT_SETTINGS: AppSettings = {
   emailNotifications: true,
   systemNotifications: true,
   detectionAlerts: false,
-  profileName: "",
-  profileEmail: "",
 };

@@ -14,7 +14,6 @@ import type {
   DistributionPoint,
   Page,
   TimeSeriesPoint,
-  User,
   Vehicle,
   VehicleType,
 } from "@/types";
@@ -429,10 +428,7 @@ export async function getAnalytics(range: { from: string; to: string }): Promise
   };
 }
 
-// Replaced by server sessions (Phase 2) and watchlist/live alerts (Phase 4).
+// Replaced by watchlist/live alerts in Phase 4.
 export async function getNotifications(): Promise<AppNotification[]> {
   return [];
-}
-export async function getCurrentUser(): Promise<User> {
-  return { id: "pending", name: "Operator", email: "", role: "viewer", initials: "OP" };
 }

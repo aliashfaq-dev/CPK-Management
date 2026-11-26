@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { authorize } from "@/lib/auth-server";
 import { getAnalytics, trailingWindow } from "@/lib/data-service";
 import { parseUtcDate } from "@/lib/detection-query";
 
@@ -7,6 +8,9 @@ export const dynamic = "force-dynamic";
 
 /** `?days=7` (trailing window) or `?from=YYYY-MM-DD&to=YYYY-MM-DD` (inclusive, max 90 days). */
 export async function GET(request: Request) {
+  const auth = await authorize(request);
+  if ("response" in auth) return auth.response;
+
   const params = new URL(request.url).searchParams;
   const from = parseUtcDate(params.get("from") ?? "");
   const to = parseUtcDate(params.get("to") ?? "", true);

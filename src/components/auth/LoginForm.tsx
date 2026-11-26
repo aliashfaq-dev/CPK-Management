@@ -2,61 +2,58 @@
 
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useEffect, useId, useState, type FormEvent } from "react";
+import { useId, useState, type FormEvent } from "react";
 import { faEye, faEyeSlash } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { fieldClass } from "@/components/ui/field";
-import { CpkLoader } from "@/components/ui/CpkLoader";
-import { useAuth } from "@/hooks/useAuth";
-import { DEMO_USER, resetSigningOut, signIn } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
-export function LoginForm() {
+interface LoginFormProps {
+  setupNotice?: string | null;
+  nextPath?: string;
+}
+
+export function LoginForm({ setupNotice = null, nextPath = "/" }: LoginFormProps) {
   const router = useRouter();
-  const { status } = useAuth();
-  // Pre-filled for quick testing of the demo account. Remove before production.
-  const [identifier, setIdentifier] = useState(DEMO_USER.email);
-  const [password, setPassword] = useState(DEMO_USER.password);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const passwordId = useId();
   const errorId = useId();
 
-  useEffect(() => {
-    resetSigningOut();
-    router.prefetch("/");
-  }, [router]);
-
-  useEffect(() => {
-    if (status === "authenticated") router.replace("/");
-  }, [status, router]);
-
-  const onSubmit = (event: FormEvent) => {
+  const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
     if (submitting) return;
-    if (!identifier.trim() || !password) {
-      setError("Enter your email or officer ID and your password.");
+    if (!email.trim() || !password) {
+      setError("Enter your email and password.");
       return;
     }
     setSubmitting(true);
-    const result = signIn(identifier, password);
-    if (!result.ok) {
-      setError(
-        result.reason === "storage"
-          ? "Sign-in needs browser storage, which is blocked. Allow site data for this page and try again."
-          : "Incorrect email/officer ID or password.",
-      );
+    setError(null);
+    try {
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim(), password }),
+      });
+      if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as { error?: string } | null;
+        setError(body?.error ?? "Sign-in failed.");
+        setSubmitting(false);
+        return;
+      }
+      router.replace(nextPath);
+      router.refresh();
+    } catch {
+      setError("Could not reach the server. Check your connection and try again.");
       setSubmitting(false);
-      return;
     }
-    router.replace("/");
   };
-
-  if (status === "authenticated" || submitting) return <CpkLoader text="Signing in..." />;
 
   return (
     <Card className="w-full max-w-md p-6 sm:p-8">
@@ -70,15 +67,21 @@ export function LoginForm() {
 
       <h1 className="mt-6 text-center text-base font-semibold">Sign in to your account</h1>
 
+      {setupNotice && (
+        <p role="status" className="mt-4 rounded-md border border-warning/30 bg-warning/10 px-3 py-2.5 text-sm text-warning-strong">
+          {setupNotice}
+        </p>
+      )}
+
       <form onSubmit={onSubmit} noValidate className="mt-5 space-y-4">
         <Input
-          label="Email / Officer ID"
-          type="text"
-          name="identifier"
-          autoComplete="username"
+          label="Email"
+          type="email"
+          name="email"
+          autoComplete="email"
           autoFocus
-          value={identifier}
-          onChange={(event) => setIdentifier(event.target.value)}
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
           aria-describedby={error ? errorId : undefined}
           className={cn("h-10", error && "border-danger")}
         />
@@ -119,11 +122,10 @@ export function LoginForm() {
           </p>
         )}
 
-        <Button type="submit" variant="primary" className="h-10 w-full" disabled={submitting}>
+        <Button type="submit" variant="primary" className="h-10 w-full" disabled={submitting || Boolean(setupNotice)}>
           {submitting ? "Signing in…" : "Sign in"}
         </Button>
       </form>
-
     </Card>
   );
 }

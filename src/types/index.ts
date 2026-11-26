@@ -148,23 +148,6 @@ export interface AppSettings {
   emailNotifications: boolean;
   systemNotifications: boolean;
   detectionAlerts: boolean;
-  profileName: string;
-  profileEmail: string;
-}
-
-/** Demo-only account kept in localStorage. Removed in the auth phase. */
-export interface RegisteredUser {
-  email: string;
-  password: string;
-  name: string;
-  role: string;
-}
-
-export interface AuthSession {
-  email: string;
-  name: string;
-  role: string;
-  signedInAt: string;
 }
 
 /** One Chrome-style workspace tab on the Live Camera page. An empty `cameraIds` means a blank "New View". */

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { memo, useCallback, useEffect } from "react";
+import { memo, useCallback } from "react";
 import {
   faBars,
   faBell,
@@ -15,7 +15,6 @@ import { NAV_ITEMS } from "@/data/navigation";
 import type { AppNotification, User } from "@/types";
 import { Button } from "@/components/ui/Button";
 import { Popover } from "@/components/ui/Popover";
-import { signOut } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { isActivePath } from "./Sidebar";
 import { NavbarClock } from "./NavbarClock";
@@ -32,19 +31,19 @@ const toneDot: Record<AppNotification["tone"], string> = {
   danger: "bg-danger",
 };
 
+function roleLabel(role: User["role"]): string {
+  return role === "admin" ? "Administrator" : "Viewer";
+}
 
 function HeaderComponent({ user, notifications, onMenuClick }: HeaderProps) {
   const pathname = usePathname();
   const router = useRouter();
   const current = NAV_ITEMS.find((item) => isActivePath(pathname, item.href));
-  useEffect(() => {
-    router.prefetch("/login");
-  }, [router]);
 
-  // Clears the session and leaves immediately. Clearing the session makes AuthGuard show <CpkLoader text="Signing out..." /> right away.
-  const onLogout = useCallback(() => {
-    signOut();
+  const onLogout = useCallback(async () => {
+    await fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined);
     router.replace("/login");
+    router.refresh();
   }, [router]);
 
   return (
@@ -93,18 +92,22 @@ function HeaderComponent({ user, notifications, onMenuClick }: HeaderProps) {
           {(close) => (
             <div>
               <div className="border-b border-line px-4 py-3 text-sm font-semibold">Notifications</div>
-              <ul className="max-h-80 divide-y divide-line overflow-y-auto">
-                {notifications.map((item) => (
-                  <li key={item.id} className="flex gap-3 px-4 py-3">
-                    <span className={cn("mt-1.5 h-2 w-2 shrink-0 rounded-full", toneDot[item.tone])} aria-hidden="true" />
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium">{item.title}</p>
-                      <p className="text-xs text-muted">{item.description}</p>
-                      <p className="mt-1 text-xs text-muted">{item.time}</p>
-                    </div>
-                  </li>
-                ))}
-              </ul>
+              {notifications.length === 0 ? (
+                <p className="px-4 py-6 text-center text-xs text-muted">No alerts right now.</p>
+              ) : (
+                <ul className="max-h-80 divide-y divide-line overflow-y-auto">
+                  {notifications.map((item) => (
+                    <li key={item.id} className="flex gap-3 px-4 py-3">
+                      <span className={cn("mt-1.5 h-2 w-2 shrink-0 rounded-full", toneDot[item.tone])} aria-hidden="true" />
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium">{item.title}</p>
+                        <p className="text-xs text-muted">{item.description}</p>
+                        <p className="mt-1 text-xs text-muted">{item.time}</p>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
               <Link href="/settings" onClick={close} className="block border-t border-line px-4 py-3 text-center text-sm font-medium text-accent hover:bg-subtle">
                 Notification settings
               </Link>
@@ -123,7 +126,7 @@ function HeaderComponent({ user, notifications, onMenuClick }: HeaderProps) {
               </span>
               <span className="hidden text-left sm:block">
                 <span className="block text-sm font-medium leading-tight">{user.name}</span>
-                <span className="block text-xs leading-tight text-muted">{user.role}</span>
+                <span className="block text-xs leading-tight text-muted">{roleLabel(user.role)}</span>
               </span>
               <FontAwesomeIcon icon={faChevronDown} className="hidden text-[10px] text-muted sm:block" />
             </>
@@ -149,7 +152,7 @@ function HeaderComponent({ user, notifications, onMenuClick }: HeaderProps) {
                   type="button"
                   onClick={() => {
                     close();
-                    onLogout();
+                    void onLogout();
                   }}
                   className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium text-danger-strong hover:bg-subtle"
                 >

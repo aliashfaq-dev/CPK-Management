@@ -1,66 +1,144 @@
 "use client";
 
-import { useState, type ChangeEvent, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
+import { useState, type FormEvent } from "react";
 import type { User } from "@/types";
+import { Badge } from "@/components/ui/StatusBadge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { SettingsSection } from "./SettingsSection";
-import type { SectionProps } from "./GeneralSettings";
 
-export function ProfileSettings({ settings, update, user }: SectionProps & { user: User }) {
-  const [avatar, setAvatar] = useState<string | null>(null);
+const MIN_PASSWORD = 8;
+
+async function readError(response: Response, fallback: string): Promise<string> {
+  try {
+    const body = (await response.json()) as { error?: string };
+    return body.error ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+export function ProfileSettings({ user }: { user: User }) {
+  const router = useRouter();
+  const [name, setName] = useState(user.name);
+  const [savingName, setSavingName] = useState(false);
+  const [nameStatus, setNameStatus] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+
   const [passwords, setPasswords] = useState({ current: "", next: "", confirm: "" });
-  const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const [savingPassword, setSavingPassword] = useState(false);
+  const [passwordStatus, setPasswordStatus] = useState<{ tone: "success" | "error"; text: string } | null>(null);
 
-  const onAvatarChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (avatar) URL.revokeObjectURL(avatar);
-    setAvatar(file ? URL.createObjectURL(file) : null);
+  const onNameSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    const trimmed = name.trim();
+    if (!trimmed || savingName) return;
+    setSavingName(true);
+    setNameStatus(null);
+    try {
+      const response = await fetch("/api/auth/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: trimmed }),
+      });
+      if (!response.ok) {
+        setNameStatus({ tone: "error", text: await readError(response, "Could not update your name.") });
+        return;
+      }
+      setNameStatus({ tone: "success", text: "Display name updated." });
+      router.refresh();
+    } finally {
+      setSavingName(false);
+    }
   };
 
-  const onPasswordSubmit = (event: FormEvent) => {
+  const onPasswordSubmit = async (event: FormEvent) => {
     event.preventDefault();
-    if (passwords.next.length < 8) {
-      setMessage({ tone: "error", text: "Use at least 8 characters for the new password." });
-    } else if (passwords.next !== passwords.confirm) {
-      setMessage({ tone: "error", text: "The new passwords do not match." });
-    } else {
-      // UI only: connect this to your authentication API.
+    if (savingPassword) return;
+    if (passwords.next.length < MIN_PASSWORD) {
+      setPasswordStatus({ tone: "error", text: `Use at least ${MIN_PASSWORD} characters for the new password.` });
+      return;
+    }
+    if (passwords.next !== passwords.confirm) {
+      setPasswordStatus({ tone: "error", text: "The new passwords do not match." });
+      return;
+    }
+    setSavingPassword(true);
+    setPasswordStatus(null);
+    try {
+      const response = await fetch("/api/auth/password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ current: passwords.current, next: passwords.next }),
+      });
+      if (!response.ok) {
+        setPasswordStatus({ tone: "error", text: await readError(response, "Could not update your password.") });
+        return;
+      }
       setPasswords({ current: "", next: "", confirm: "" });
-      setMessage({ tone: "success", text: "Password form is valid. Connect an authentication API to save it." });
+      setPasswordStatus({ tone: "success", text: "Password updated." });
+    } finally {
+      setSavingPassword(false);
     }
   };
 
   return (
-    <SettingsSection title="Profile" description="Your name, email, photo, and password.">
+    <SettingsSection title="Profile" description="Your signed-in account details and password.">
       <div className="flex items-center gap-4">
-        {avatar ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={avatar} alt="Profile preview" className="h-16 w-16 rounded-full border border-line object-cover" />
-        ) : (
-          <span className="flex h-16 w-16 items-center justify-center rounded-full bg-accent-soft text-lg font-semibold text-accent">{user.initials}</span>
-        )}
-        <label className="inline-flex h-9 cursor-pointer items-center rounded-md border border-line bg-surface px-3.5 text-sm font-medium hover:bg-subtle focus-within:outline-2 focus-within:outline-accent">
-          Change photo
-          <input type="file" accept="image/*" className="sr-only" onChange={onAvatarChange} />
-        </label>
+        <span className="flex h-14 w-14 items-center justify-center rounded-full bg-accent-soft text-base font-semibold text-accent">
+          {user.initials}
+        </span>
+        <div>
+          <p className="text-sm font-medium">{user.email}</p>
+          <div className="mt-1">
+            <Badge tone={user.role === "admin" ? "info" : "neutral"}>{user.role === "admin" ? "Administrator" : "Viewer"}</Badge>
+          </div>
+        </div>
       </div>
 
-      <Input label="Name" value={settings.profileName} onChange={(e) => update({ profileName: e.target.value })} />
-      <Input type="email" label="Email" value={settings.profileEmail} onChange={(e) => update({ profileEmail: e.target.value })} />
+      <form onSubmit={onNameSubmit} className="space-y-4">
+        <Input label="Display name" value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" />
+        <Input type="email" label="Email" value={user.email} disabled hint="Email addresses are managed by an administrator." />
+        {nameStatus && (
+          <p role="status" className={nameStatus.tone === "success" ? "text-sm text-success-strong" : "text-sm text-danger-strong"}>
+            {nameStatus.text}
+          </p>
+        )}
+        <Button type="submit" variant="primary" disabled={savingName || !name.trim() || name.trim() === user.name}>
+          {savingName ? "Saving…" : "Save profile"}
+        </Button>
+      </form>
 
       <form onSubmit={onPasswordSubmit} className="space-y-4 border-t border-line pt-6">
         <h3 className="text-sm font-semibold">Change password</h3>
-        <Input type="password" label="Current password" autoComplete="current-password" value={passwords.current} onChange={(e) => setPasswords({ ...passwords, current: e.target.value })} />
-        <Input type="password" label="New password" autoComplete="new-password" value={passwords.next} onChange={(e) => setPasswords({ ...passwords, next: e.target.value })} />
-        <Input type="password" label="Confirm new password" autoComplete="new-password" value={passwords.confirm} onChange={(e) => setPasswords({ ...passwords, confirm: e.target.value })} />
-        {message && (
-          <p role="status" className={message.tone === "success" ? "text-sm text-success-strong" : "text-sm text-danger-strong"}>
-            {message.text}
+        <Input
+          type="password"
+          label="Current password"
+          autoComplete="current-password"
+          value={passwords.current}
+          onChange={(e) => setPasswords({ ...passwords, current: e.target.value })}
+        />
+        <Input
+          type="password"
+          label={`New password (at least ${MIN_PASSWORD} characters)`}
+          autoComplete="new-password"
+          value={passwords.next}
+          onChange={(e) => setPasswords({ ...passwords, next: e.target.value })}
+        />
+        <Input
+          type="password"
+          label="Confirm new password"
+          autoComplete="new-password"
+          value={passwords.confirm}
+          onChange={(e) => setPasswords({ ...passwords, confirm: e.target.value })}
+        />
+        {passwordStatus && (
+          <p role="status" className={passwordStatus.tone === "success" ? "text-sm text-success-strong" : "text-sm text-danger-strong"}>
+            {passwordStatus.text}
           </p>
         )}
-        <Button type="submit" variant="primary" disabled={!passwords.current}>
-          Update password
+        <Button type="submit" variant="primary" disabled={!passwords.current || !passwords.next || savingPassword}>
+          {savingPassword ? "Updating…" : "Update password"}
         </Button>
       </form>
     </SettingsSection>
