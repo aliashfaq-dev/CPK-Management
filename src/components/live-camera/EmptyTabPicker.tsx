@@ -5,9 +5,8 @@ import { faVideo } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import type { Camera } from "@/types";
 import { Button } from "@/components/ui/Button";
-import { SearchInput } from "@/components/ui/SearchInput";
 import { StatusBadge } from "@/components/ui/StatusBadge";
-import { matchesCamera } from "@/lib/cameras";
+import { sortByCameraNumber } from "@/lib/cameras";
 
 interface EmptyTabPickerProps {
   cameras: Camera[];
@@ -16,16 +15,20 @@ interface EmptyTabPickerProps {
   onAssign: (cameraIds: string[]) => void;
 }
 
-/** Blank-tab state: search by camera number or address/area, tick cameras, then load them into the tab. */
+/** Blank-tab state: select registered cameras from the list to load into this view. */
 export function EmptyTabPicker({ cameras, limit, onAssign }: EmptyTabPickerProps) {
-  const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
-
-  const results = useMemo(() => cameras.filter((camera) => matchesCamera(camera, query)), [cameras, query]);
+  const sorted = useMemo(() => sortByCameraNumber(cameras), [cameras]);
   const full = selected.length >= limit;
 
   const toggle = (id: string) =>
-    setSelected((current) => (current.includes(id) ? current.filter((value) => value !== id) : current.length >= limit ? current : [...current, id]));
+    setSelected((current) =>
+      current.includes(id)
+        ? current.filter((value) => value !== id)
+        : current.length >= limit
+          ? current
+          : [...current, id],
+    );
 
   return (
     <div className="flex h-full min-h-0 flex-col items-center overflow-y-auto py-4">
@@ -34,29 +37,26 @@ export function EmptyTabPicker({ cameras, limit, onAssign }: EmptyTabPickerProps
           <span className="flex h-11 w-11 items-center justify-center rounded-md bg-accent-soft text-accent">
             <FontAwesomeIcon icon={faVideo} />
           </span>
-          <h2 className="mt-3 text-base font-semibold">New view</h2>
-          <p className="mt-1 text-sm text-muted">Search by camera number or address to choose the cameras for this tab.</p>
+          <h2 className="mt-3 text-base font-semibold">New camera view</h2>
+          <p className="mt-1 text-sm text-muted">Choose the cameras to display in this tab.</p>
         </div>
 
-        <SearchInput
-          autoFocus
-          value={query}
-          onChange={setQuery}
-          label="Search cameras by number or address"
-          placeholder="Camera number or area, e.g. CAM-01, Karsaz, Clifton"
-          className="mt-4"
-        />
-
-        <ul className="mt-3 max-h-64 divide-y divide-line overflow-y-auto rounded-lg border border-line" aria-label="Matching cameras">
-          {results.length === 0 ? (
-            <li className="px-4 py-6 text-center text-sm text-muted">No cameras match “{query.trim()}”.</li>
+        <ul className="mt-4 max-h-72 divide-y divide-line overflow-y-auto rounded-lg border border-line" aria-label="Registered cameras">
+          {sorted.length === 0 ? (
+            <li className="px-4 py-6 text-center text-sm text-muted">No cameras registered yet.</li>
           ) : (
-            results.map((camera) => {
+            sorted.map((camera) => {
               const checked = selected.includes(camera.id);
               return (
                 <li key={camera.id}>
                   <label className="flex cursor-pointer items-center gap-3 px-4 py-2.5 hover:bg-subtle has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60">
-                    <input type="checkbox" checked={checked} disabled={!checked && full} onChange={() => toggle(camera.id)} className="h-4 w-4 accent-accent" />
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      disabled={!checked && full}
+                      onChange={() => toggle(camera.id)}
+                      className="h-4 w-4 accent-accent"
+                    />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium">
                         {camera.id} · {camera.name}

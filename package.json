@@ -12,6 +12,8 @@
     "cache:warm": "node scripts/warm-image-cache.mjs",
     "bench:images": "node scripts/bench-images.mjs",
     "mock:pipeline": "node scripts/mock-pipeline.mjs",
+    "test": "node --test tests/ai-search.golden.test.mts",
+    "test:ai-live": "node scripts/test-ai-live.mjs",
     "test:constraints": "node scripts/verify-constraints.mjs"
   },
   "dependencies": {

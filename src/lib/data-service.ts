@@ -1,5 +1,5 @@
 import { query } from "@/lib/db";
-import { normalizePlate } from "@/lib/detection-query";
+import { normalizePlate, ocrFoldPlate } from "@/lib/detection-query";
 import { primeEventImageKeys } from "@/lib/image-cache";
 import { MAX_PAGE_SIZE, VEHICLE_TYPES } from "@/lib/constants";
 import type {
@@ -47,7 +47,8 @@ function toPercent(value: unknown): number | null {
 
 const PLATE_CONFIDENCE_SQL =
   "(CASE WHEN v.number_plate_confidence IS NULL THEN NULL WHEN v.number_plate_confidence <= 1 THEN v.number_plate_confidence * 100 ELSE v.number_plate_confidence END)";
-const PLATE_NORM_SQL = "upper(regexp_replace(v.number_plate, '[^A-Za-z0-9]', '', 'g'))";
+const PLATE_NORM_SQL = "upper(regexp_replace(COALESCE(v.number_plate, ''), '[^A-Za-z0-9]', '', 'g'))";
+const PLATE_OCR_SQL = `translate(${PLATE_NORM_SQL}, 'OISB', '0158')`;
 
 const SORT_COLUMNS: Record<DetectionSortKey, string> = {
   plate: "v.number_plate",
@@ -104,13 +105,31 @@ function buildWhere(filters: DetectionFilters): Where {
     params.push(value);
     conditions.push(sql.replace("?", `$${params.length}`));
   };
-  if (filters.plate) add(`${PLATE_NORM_SQL} LIKE '%' || ? || '%'`, normalizePlate(filters.plate));
+  if (filters.plate) {
+    if (filters.plateMode === "exact") {
+      add(`${PLATE_NORM_SQL} = ?`, normalizePlate(filters.plate));
+    } else if (filters.plateMode === "fuzzy") {
+      add(`${PLATE_OCR_SQL} LIKE '%' || ? || '%'`, ocrFoldPlate(filters.plate));
+    } else {
+      add(`${PLATE_NORM_SQL} LIKE '%' || ? || '%'`, normalizePlate(filters.plate));
+    }
+  }
   if (filters.plateExact) add(`${PLATE_NORM_SQL} = ?`, normalizePlate(filters.plateExact));
-  if (filters.type) add("v.vehicle_type = ?", filters.type);
+  if (filters.types && filters.types.length > 0) {
+    add("v.vehicle_type = ANY(?::text[])", filters.types);
+  } else if (filters.type) {
+    add("v.vehicle_type = ?", filters.type);
+  }
   if (filters.camera) add("v.camera_id = ?", filters.camera);
   if (filters.from) add("v.event_time >= ?::timestamptz", filters.from);
   if (filters.to) add("v.event_time < ?::timestamptz", filters.to);
-  if (filters.colour) add("lower(v.colour) = lower(?)", filters.colour);
+  if (filters.colours && filters.colours.length > 0) {
+    add("lower(COALESCE(v.colour, '')) = ANY(?::text[])", filters.colours);
+  } else if (filters.colour) {
+    add("lower(v.colour) = lower(?)", filters.colour);
+  }
+  if (filters.make) add("lower(COALESCE(v.make, '')) LIKE '%' || ? || '%'", filters.make.toLowerCase());
+  if (filters.model) add("lower(COALESCE(v.model, '')) LIKE '%' || ? || '%'", filters.model.toLowerCase());
   if (filters.hasPlate !== undefined) add("v.has_plate = ?", filters.hasPlate);
   if (filters.minConfidence) add(`${PLATE_CONFIDENCE_SQL} >= ?`, filters.minConfidence);
   return { clause: conditions.length ? `WHERE ${conditions.join(" AND ")}` : "", params };

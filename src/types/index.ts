@@ -200,13 +200,19 @@ export interface DetectionFilters {
   plate?: string;
   /** Exact normalised plate. */
   plateExact?: string;
+  /** Plate matching strategy (`contains` default, `exact`, or OCR-tolerant `fuzzy`). */
+  plateMode?: "exact" | "contains" | "fuzzy";
   type?: VehicleType;
+  types?: VehicleType[];
   camera?: string;
   /** Inclusive ISO timestamp. */
   from?: string;
   /** Exclusive ISO timestamp. */
   to?: string;
   colour?: string;
+  colours?: string[];
+  make?: string;
+  model?: string;
   hasPlate?: boolean;
   /** Minimum plate confidence, 0-100. */
   minConfidence?: number;

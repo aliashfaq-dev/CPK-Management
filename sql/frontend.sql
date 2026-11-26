@@ -12,6 +12,15 @@ EXCEPTION WHEN undefined_function THEN
 END
 $$;
 
+-- Optional trigram extension for fuzzy OCR plate similarity(); degrades gracefully if unavailable.
+DO $$
+BEGIN
+  CREATE EXTENSION IF NOT EXISTS pg_trgm;
+EXCEPTION WHEN OTHERS THEN
+  NULL;
+END
+$$;
+
 -- ---------------------------------------------------------------------------
 -- Dashboard view over events. make/model/colour come from the stage-2 `analysis`
 -- JSONB and are NULL until that pipeline has written it.

@@ -11,6 +11,8 @@ import { ConfidenceCell } from "./ConfidenceCell";
 import { PlateTag } from "./PlateTag";
 import { VehicleThumbnail } from "./VehicleThumbnail";
 
+export type OptionalColumnKey = "cameraId" | "location" | "detectedAt" | "confidence";
+
 interface DetectionTableProps {
   detections: Detection[];
   variant?: "compact" | "full";
@@ -20,11 +22,14 @@ interface DetectionTableProps {
   onSelect?: (detection: Detection) => void;
   /** Ids to highlight as freshly arrived (live updates). */
   highlightIds?: ReadonlySet<string>;
+  /** Hidden optional columns in full-table mode. */
+  hiddenColumns?: ReadonlySet<OptionalColumnKey>;
 }
 
 interface Header {
   label: string;
   key?: DetectionSortKey;
+  optionalKey?: OptionalColumnKey;
   className?: string;
 }
 
@@ -32,10 +37,10 @@ const FULL_HEADERS: Header[] = [
   { label: "Vehicle" },
   { label: "License plate", key: "plate" },
   { label: "Vehicle type", key: "vehicleType" },
-  { label: "Camera ID", key: "cameraId" },
-  { label: "Location" },
-  { label: "Detection time", key: "detectedAt" },
-  { label: "Confidence", key: "confidence" },
+  { label: "Camera ID", key: "cameraId", optionalKey: "cameraId" },
+  { label: "Location", optionalKey: "location" },
+  { label: "Detection time", key: "detectedAt", optionalKey: "detectedAt" },
+  { label: "Confidence", key: "confidence", optionalKey: "confidence" },
   { label: "Actions", className: "text-right" },
 ];
 
@@ -80,9 +85,12 @@ function DetectionTableComponent({
   onSort,
   onSelect,
   highlightIds,
+  hiddenColumns,
 }: DetectionTableProps) {
   const full = variant === "full";
-  const headers = full ? FULL_HEADERS : COMPACT_HEADERS;
+  const headers = full
+    ? FULL_HEADERS.filter((h) => !h.optionalKey || !hiddenColumns?.has(h.optionalKey))
+    : COMPACT_HEADERS;
   const cellPad = full ? "px-4 py-3" : "px-3 py-2.5";
 
   return (
@@ -138,10 +146,18 @@ function DetectionTableComponent({
                     <>
                       <td className={cellPad}><Plate detection={d} priority={priority} compact={false} /></td>
                       <td className={cellPad}>{VEHICLE_TYPE_LABELS[d.vehicleType] ?? d.vehicleType}</td>
-                      <td className={cn(cellPad, "text-muted")}>{d.cameraId}</td>
-                      <td className={cn(cellPad, "max-w-48 truncate text-muted")}>{hasRealLocation ? d.location : "—"}</td>
-                      <td className={cn(cellPad, "whitespace-nowrap text-muted")}>{formatDateTime(d.detectedAt)}</td>
-                      <td className={cellPad}>{d.hasPlate ? <ConfidenceCell value={d.confidence} /> : <span className="text-xs text-muted">—</span>}</td>
+                      {!hiddenColumns?.has("cameraId") && (
+                        <td className={cn(cellPad, "text-muted")}>{d.cameraId}</td>
+                      )}
+                      {!hiddenColumns?.has("location") && (
+                        <td className={cn(cellPad, "max-w-48 truncate text-muted")}>{hasRealLocation ? d.location : "—"}</td>
+                      )}
+                      {!hiddenColumns?.has("detectedAt") && (
+                        <td className={cn(cellPad, "whitespace-nowrap text-muted")}>{formatDateTime(d.detectedAt)}</td>
+                      )}
+                      {!hiddenColumns?.has("confidence") && (
+                        <td className={cellPad}>{d.hasPlate ? <ConfidenceCell value={d.confidence} /> : <span className="text-xs text-muted">—</span>}</td>
+                      )}
                       <td className={cn(cellPad, "text-right")}>
                         <Button
                           variant="ghost"

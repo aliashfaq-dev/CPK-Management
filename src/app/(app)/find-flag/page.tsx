@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { FindFlagView } from "@/components/find-flag/FindFlagView";
-import { AssistantChat } from "@/components/ui/AssistantChat";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { PAGE_SIZE } from "@/lib/constants";
 import { getCameras, getDetectionsPage, getVehicleCameraBreakdown, getVehiclesPage } from "@/lib/data-service";
@@ -40,8 +39,7 @@ export default async function FindFlagPage({ searchParams }: { searchParams: Pro
 
   return (
     <>
-      <PageHeader description="Locate a vehicle by plate, type, camera, or time range and review where it was detected." />
-      <AssistantChat className="mb-6" title="Describe the vehicle you want to flag" description="Tell the assistant what you remember: part of the plate, colour, type, camera, or time." />
+      <PageHeader description="Locate a vehicle with Gemini AI and inspect its snapshots, timeline, and camera sightings." />
       <FindFlagView
         filters={filters}
         vehicles={vehicles}

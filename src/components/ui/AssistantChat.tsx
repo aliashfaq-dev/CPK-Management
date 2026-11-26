@@ -7,168 +7,208 @@ import {
   useEffect,
   useRef,
   useState,
-  type ChangeEvent,
   type FormEvent,
   type KeyboardEvent,
 } from "react";
 import {
   faArrowRight,
-  faPaperclip,
+  faCircleExclamation,
+  faDownload,
   faPaperPlane,
   faSpinner,
   faTrashCan,
   faWandMagicSparkles,
-  faXmark,
 } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import type { AppliedFilterChip, RawAiFilter } from "@/lib/ai-search-core";
+import { askAssistant, type AssistantGroupRow } from "@/lib/assistant";
 import type { Detection } from "@/types";
 import { ConfidenceCell } from "@/components/detections/ConfidenceCell";
+import { DetectionDetailDrawer } from "@/components/detections/DetectionDetailDrawer";
 import { PlateTag } from "@/components/detections/PlateTag";
 import { VehicleThumbnail } from "@/components/detections/VehicleThumbnail";
-import { askAssistant } from "@/lib/assistant";
 import { VEHICLE_TYPE_LABELS } from "@/lib/constants";
-import { cn, formatDateTime, vehicleDescription } from "@/lib/utils";
-import { Button } from "./Button";
+import { cn, formatDateTime, formatNumber, vehicleDescription } from "@/lib/utils";
+import { Button, buttonClasses } from "./Button";
 import { Card } from "./Card";
-
-interface Attachment {
-  id: number;
-  name: string;
-  kind: "image" | "video";
-  url: string;
-}
 
 interface Message {
   id: number;
   role: "user" | "assistant";
   text: string;
-  attachments?: Attachment[];
+  chips?: AppliedFilterChip[];
+  groups?: AssistantGroupRow[];
   results?: Detection[];
   total?: number;
   href?: string;
+  exportHref?: string;
+  unavailable?: boolean;
 }
 
 interface AssistantChatProps {
   title?: string;
   description?: string;
   className?: string;
+  /** Optional callback fired when a search yields URL filter query params (e.g. to sync page cards/table). */
+  onSearchFilterHref?: (href: string) => void;
 }
 
-const MAX_ATTACHMENTS = 4;
-const MAX_FILE_BYTES = 100 * 1024 * 1024;
-
-function describeAttachments(items: Attachment[]): string {
-  const images = items.filter((item) => item.kind === "image").length;
-  const videos = items.length - images;
-  const parts = [
-    images > 0 && `${images} picture${images === 1 ? "" : "s"}`,
-    videos > 0 && `${videos} video${videos === 1 ? "" : "s"}`,
-  ].filter(Boolean);
-  return parts.join(" and ");
-}
-
-function AttachmentPreview({ item, onRemove }: { item: Attachment; onRemove: (id: number) => void }) {
-  return (
-    <li className="relative h-16 w-16 shrink-0 overflow-hidden rounded-md border border-line bg-subtle">
-      {item.kind === "image" ? (
-        // Blob URL from the file picker; next/image cannot optimise it.
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={item.url} alt={item.name} className="h-full w-full object-cover" />
-      ) : (
-        <video src={item.url} aria-label={item.name} muted playsInline preload="metadata" className="h-full w-full object-cover" />
-      )}
-      <button
-        type="button"
-        onClick={() => onRemove(item.id)}
-        aria-label={`Remove ${item.name}`}
-        className="absolute right-0.5 top-0.5 flex h-5 w-5 items-center justify-center rounded bg-fg/70 text-[10px] text-white hover:bg-fg"
-      >
-        <FontAwesomeIcon icon={faXmark} />
-      </button>
-    </li>
-  );
-}
-
-const MessageItem = memo(function MessageItem({ message }: { message: Message }) {
+const MessageItem = memo(function MessageItem({
+  message,
+  onInspect,
+}: {
+  message: Message;
+  onInspect: (detection: Detection) => void;
+}) {
   if (message.role === "user") {
     return (
-      <div className="flex flex-col items-end gap-2">
-        {message.attachments && message.attachments.length > 0 && (
-          <ul className="flex max-w-[85%] flex-wrap justify-end gap-2" aria-label="Attached files">
-            {message.attachments.map((item) => (
-              <li key={item.id} className="h-24 w-32 overflow-hidden rounded-md border border-line bg-surface">
-                {item.kind === "image" ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={item.url} alt={item.name} className="h-full w-full object-cover" />
-                ) : (
-                  <video src={item.url} aria-label={item.name} controls playsInline preload="metadata" className="h-full w-full object-cover" />
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-        {message.text && <p className="max-w-[85%] rounded-lg rounded-br-sm bg-accent px-4 py-2.5 text-sm text-white">{message.text}</p>}
+      <div className="flex justify-end">
+        <p className="max-w-[85%] rounded-lg rounded-br-sm bg-accent px-4 py-2.5 text-sm text-white">
+          {message.text}
+        </p>
       </div>
     );
   }
 
   return (
-    <div className="max-w-[95%] space-y-3">
-      <p className="inline-block rounded-lg rounded-bl-sm border border-line bg-surface px-4 py-2.5 text-sm">{message.text}</p>
+    <div className="max-w-[96%] space-y-3">
+      {message.unavailable ? (
+        <div
+          role="alert"
+          className="inline-flex items-start gap-2.5 rounded-lg border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning-strong"
+        >
+          <FontAwesomeIcon icon={faCircleExclamation} className="mt-0.5 shrink-0" />
+          <span>{message.text}</span>
+        </div>
+      ) : (
+        <p className="inline-block rounded-lg rounded-bl-sm border border-line bg-surface px-4 py-2.5 text-sm">
+          {message.text}
+        </p>
+      )}
+
+      {message.chips && message.chips.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5" aria-label="Applied AI filters">
+          <span className="text-[11px] font-medium text-muted">Applied filters:</span>
+          {message.chips.map((chip, idx) => (
+            <span
+              key={`${chip.label}-${idx}`}
+              className="inline-flex items-center gap-1 rounded border border-line bg-surface px-2 py-0.5 text-xs"
+            >
+              <span className="text-muted">{chip.label}:</span>
+              <span className="font-medium text-fg">{chip.value}</span>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {message.groups && message.groups.length > 0 && (
+        <div className="overflow-hidden rounded-lg border border-line bg-surface">
+          <table className="w-full text-left text-xs">
+            <thead>
+              <tr className="border-b border-line bg-subtle text-muted">
+                <th scope="col" className="px-3.5 py-2 font-medium">Group</th>
+                <th scope="col" className="px-3.5 py-2 text-right font-medium">Detections</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-line">
+              {message.groups.map((group) => (
+                <tr key={group.label}>
+                  <td className="px-3.5 py-2 font-medium">{group.label}</td>
+                  <td className="px-3.5 py-2 text-right tabular-nums">{formatNumber(group.count)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       {message.results && message.results.length > 0 && (
         <ul className="divide-y divide-line overflow-hidden rounded-lg border border-line bg-surface">
-          {message.results.map((d) => (
+          {message.results.map((d, index) => (
             <li key={d.id}>
-              <Link href={d.plate ? `/detections?q=${encodeURIComponent(d.plate)}` : "/detections"} className="flex items-center gap-3 px-4 py-3 hover:bg-subtle">
-                <VehicleThumbnail type={d.vehicleType} eventId={d.id} hasImage={d.hasVehicleImage} />
+              <button
+                type="button"
+                onClick={() => onInspect(d)}
+                className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-subtle"
+              >
+                <VehicleThumbnail
+                  type={d.vehicleType}
+                  eventId={d.id}
+                  hasImage={d.hasVehicleImage}
+                  size={160}
+                  priority={index < 4}
+                />
                 <span className="min-w-0 flex-1">
-                  {d.plate ? <PlateTag plate={d.plate} /> : <span className="text-xs text-muted">No plate read</span>}
+                  <span className="flex flex-wrap items-center gap-2">
+                    {d.hasPlateImage && (
+                      <VehicleThumbnail
+                        type={d.vehicleType}
+                        eventId={d.id}
+                        hasImage
+                        kind="plate"
+                        size={320}
+                        priority={index < 4}
+                        className="h-6 w-14"
+                      />
+                    )}
+                    {d.plate ? (
+                      <PlateTag plate={d.plate} />
+                    ) : (
+                      <span className="text-xs text-muted">No plate read</span>
+                    )}
+                  </span>
                   <span className="mt-1 block truncate text-xs text-muted">
                     {VEHICLE_TYPE_LABELS[d.vehicleType]} · {vehicleDescription(d.color, d.make)} · {d.cameraName} · {formatDateTime(d.detectedAt)}
                   </span>
                 </span>
                 {d.hasPlate && <ConfidenceCell value={d.confidence} />}
-              </Link>
+              </button>
             </li>
           ))}
         </ul>
       )}
-      {message.href && (message.total ?? 0) > 0 && (
-        <Link href={message.href} className="inline-flex items-center gap-1.5 text-xs font-medium text-accent hover:underline">
-          Open all {message.total} in Detections
-          <FontAwesomeIcon icon={faArrowRight} className="text-[10px]" />
-        </Link>
+
+      {(message.total ?? 0) > 0 && (message.href || message.exportHref) && (
+        <div className="flex flex-wrap items-center gap-3">
+          {message.href && (
+            <Link
+              href={message.href}
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-accent hover:underline"
+            >
+              Open all {formatNumber(message.total ?? 0)} in Detections
+              <FontAwesomeIcon icon={faArrowRight} className="text-[10px]" />
+            </Link>
+          )}
+          {message.exportHref && (
+            <a
+              href={message.exportHref}
+              className={cn(buttonClasses("secondary", "sm"), "h-7 px-2.5 text-xs")}
+            >
+              <FontAwesomeIcon icon={faDownload} />
+              Export CSV
+            </a>
+          )}
+        </div>
       )}
     </div>
   );
 });
 
 export function AssistantChat({
-  title = "Ask the CPK assistant",
-  description = "Describe what you are looking for in English or Roman Urdu: a plate, vehicle type, color, camera, or time. You can also attach pictures or videos.",
+  title = "AI Search (Gemini)",
+  description = "Ask in English or Roman Urdu — plates (exact or OCR-fuzzy), vehicle types, colours, cameras, counts, timelines, or follow-ups like “unmein se sirf white”.",
   className,
+  onSearchFilterHref,
 }: AssistantChatProps) {
   const [messages, setMessages] = useState<Message[]>([]);
+  const [history, setHistory] = useState<RawAiFilter[]>([]);
   const [input, setInput] = useState("");
-  const [draft, setDraft] = useState<Attachment[]>([]);
-  const [attachError, setAttachError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [inspected, setInspected] = useState<Detection | null>(null);
   const nextId = useRef(1);
   const logRef = useRef<HTMLDivElement>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const urlsRef = useRef<Set<string>>(new Set());
 
-  // Release every object URL still held when the chat unmounts.
-  useEffect(() => {
-    const urls = urlsRef.current;
-    return () => {
-      urls.forEach((url) => URL.revokeObjectURL(url));
-      urls.clear();
-    };
-  }, []);
-
-  // One-line box by default (placeholder vertically centred); grows with the text up to max-h-40.
   useEffect(() => {
     const el = inputRef.current;
     if (!el) return;
@@ -180,102 +220,49 @@ export function AssistantChat({
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
   }, [messages, pending]);
 
-  const revoke = useCallback((items: Attachment[]) => {
-    for (const item of items) {
-      URL.revokeObjectURL(item.url);
-      urlsRef.current.delete(item.url);
-    }
+  const clearChat = useCallback(() => {
+    setMessages([]);
+    setHistory([]);
   }, []);
 
-  const onFiles = useCallback(
-    (event: ChangeEvent<HTMLInputElement>) => {
-      const files = Array.from(event.target.files ?? []);
-      event.target.value = "";
-      if (files.length === 0) return;
-
-      const accepted: Attachment[] = [];
-      let problem: string | null = null;
-      for (const file of files) {
-        const kind = file.type.startsWith("image/") ? "image" : file.type.startsWith("video/") ? "video" : null;
-        if (!kind) {
-          problem = "Only pictures and videos can be attached.";
-          continue;
-        }
-        if (file.size > MAX_FILE_BYTES) {
-          problem = `${file.name} is larger than ${MAX_FILE_BYTES / 1024 / 1024} MB.`;
-          continue;
-        }
-        if (draft.length + accepted.length >= MAX_ATTACHMENTS) {
-          problem = `You can attach up to ${MAX_ATTACHMENTS} files per message.`;
-          break;
-        }
-        const url = URL.createObjectURL(file);
-        urlsRef.current.add(url);
-        accepted.push({ id: nextId.current++, name: file.name, kind, url });
-      }
-      setAttachError(problem);
-      if (accepted.length > 0) setDraft((current) => [...current, ...accepted]);
-    },
-    [draft.length],
-  );
-
-  const removeDraft = useCallback(
-    (id: number) => {
-      const target = draft.find((item) => item.id === id);
-      if (target) revoke([target]);
-      setDraft((current) => current.filter((item) => item.id !== id));
-      setAttachError(null);
-    },
-    [draft, revoke],
-  );
-
-  const clearChat = useCallback(() => {
-    revoke(messages.flatMap((message) => message.attachments ?? []));
-    setMessages([]);
-  }, [messages, revoke]);
-
   const send = useCallback(async () => {
-    const query = input.trim();
-    if ((!query && draft.length === 0) || pending) return;
+    const queryText = input.trim();
+    if (!queryText || pending) return;
 
-    const attachments = draft;
-    setMessages((current) => [...current, { id: nextId.current++, role: "user", text: query, attachments }]);
+    setMessages((current) => [
+      ...current,
+      { id: nextId.current++, role: "user", text: queryText },
+    ]);
     setInput("");
-    setDraft([]);
-    setAttachError(null);
     setPending(true);
 
-    const mediaNote =
-      attachments.length > 0
-        ? `Your ${describeAttachments(attachments)} ${attachments.length === 1 ? "is" : "are"} attached, but picture and video recognition is not connected yet, so only your text was searched.`
-        : "";
-
     try {
-      if (!query) {
-        setMessages((current) => [
-          ...current,
-          {
-            id: nextId.current++,
-            role: "assistant",
-            text: `${mediaNote} Add a plate number, vehicle type, color, camera, or time to search the database records.`,
-          },
-        ]);
-        return;
+      const reply = await askAssistant(queryText, history);
+      if (reply.appliedFilter) {
+        const nextFilter = reply.appliedFilter;
+        setHistory((current) => [...current.slice(-2), nextFilter]);
       }
-      const reply = await askAssistant(query);
+      if (reply.href && onSearchFilterHref && !reply.unavailable) {
+        onSearchFilterHref(reply.href);
+      }
       setMessages((current) => [
         ...current,
-        { id: nextId.current++, role: "assistant", ...reply, text: mediaNote ? `${reply.text} ${mediaNote}` : reply.text },
+        { id: nextId.current++, role: "assistant", ...reply },
       ]);
     } catch (error) {
       setMessages((current) => [
         ...current,
-        { id: nextId.current++, role: "assistant", text: error instanceof Error ? error.message : "The search failed. Check your connection and send the question again." },
+        {
+          id: nextId.current++,
+          role: "assistant",
+          text: error instanceof Error ? error.message : "AI search abhi available nahi.",
+          unavailable: true,
+        },
       ]);
     } finally {
       setPending(false);
     }
-  }, [input, draft, pending]);
+  }, [input, pending, history, onSearchFilterHref]);
 
   const onSubmit = (event: FormEvent) => {
     event.preventDefault();
@@ -289,89 +276,80 @@ export function AssistantChat({
     }
   };
 
-  const canSend = (input.trim().length > 0 || draft.length > 0) && !pending;
+  const canSend = input.trim().length > 0 && !pending;
   const showLog = messages.length > 0 || pending;
 
   return (
-    <Card className={cn("overflow-hidden", className)}>
-      <div className="flex items-start justify-between gap-3 px-5 pt-4">
-        <div className="flex items-start gap-3">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-accent text-white">
-            <FontAwesomeIcon icon={faWandMagicSparkles} />
-          </span>
-          <div>
-            <h2 className="text-sm font-semibold">{title}</h2>
-            <p className="mt-0.5 max-w-2xl text-xs text-muted">{description}</p>
+    <>
+      <Card className={cn("overflow-hidden", className)}>
+        <div className="flex items-start justify-between gap-3 px-5 pt-4">
+          <div className="flex items-start gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-accent text-white">
+              <FontAwesomeIcon icon={faWandMagicSparkles} />
+            </span>
+            <div>
+              <h2 className="text-sm font-semibold">{title}</h2>
+              <p className="mt-0.5 max-w-2xl text-xs text-muted">{description}</p>
+            </div>
           </div>
-        </div>
-        {messages.length > 0 && (
-          <Button variant="ghost" size="sm" icon={faTrashCan} onClick={clearChat}>
-            Clear chat
-          </Button>
-        )}
-      </div>
-
-      <form onSubmit={onSubmit} className="p-4 pt-3">
-        <div className="rounded-lg border border-line-strong bg-surface p-2 focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/20">
-          {draft.length > 0 && (
-            <ul className="mb-2 flex gap-2 overflow-x-auto px-1 pt-1" aria-label="Files to send">
-              {draft.map((item) => (
-                <AttachmentPreview key={item.id} item={item} onRemove={removeDraft} />
-              ))}
-            </ul>
-          )}
-          <div className="flex items-center gap-2">
-            <input ref={fileRef} type="file" accept="image/*,video/*" multiple hidden onChange={onFiles} tabIndex={-1} aria-hidden="true" />
-            <Button
-              variant="ghost"
-              size="icon"
-              icon={faPaperclip}
-              aria-label="Attach pictures or videos"
-              disabled={draft.length >= MAX_ATTACHMENTS}
-              onClick={() => fileRef.current?.click()}
-            />
-            <label htmlFor="assistant-input" className="sr-only">
-              Describe the vehicle you are looking for
-            </label>
-            <textarea
-              id="assistant-input"
-              ref={inputRef}
-              rows={1}
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-              onKeyDown={onKeyDown}
-              placeholder="Type your search"
-              className="max-h-40 min-h-10 flex-1 resize-none self-center overflow-y-auto border-0 bg-transparent px-2 py-2.5 text-sm leading-5 shadow-none outline-none placeholder:text-muted/70 focus:outline-none focus-visible:outline-none focus:ring-0"
-            />
-            <Button type="submit" variant="danger" icon={faPaperPlane} disabled={!canSend} aria-label="Send question">
-              Search
+          {messages.length > 0 && (
+            <Button variant="ghost" size="sm" icon={faTrashCan} onClick={clearChat}>
+              Clear chat
             </Button>
-          </div>
-        </div>
-        <p className={cn("mt-2 text-xs", attachError ? "text-danger-strong" : "text-muted")} role={attachError ? "alert" : undefined}>
-          {attachError ?? "Enter to search, Shift+Enter for a new line. Searches the latest database records; pictures and videos are not analysed yet."}
-        </p>
-      </form>
-
-      {showLog && (
-        <div
-          ref={logRef}
-          role="log"
-          aria-live="polite"
-          aria-label="Search conversation"
-          className="max-h-[26rem] space-y-4 overflow-y-auto border-t border-line bg-subtle p-5"
-        >
-          {messages.map((message) => (
-            <MessageItem key={message.id} message={message} />
-          ))}
-          {pending && (
-            <p role="status" className="inline-flex items-center gap-2 rounded-lg border border-line bg-surface px-4 py-2.5 text-sm text-muted">
-              <FontAwesomeIcon icon={faSpinner} spin />
-              Searching detections…
-            </p>
           )}
         </div>
-      )}
-    </Card>
+
+        <form onSubmit={onSubmit} className="p-4 pt-3">
+          <div className="rounded-lg border border-line-strong bg-surface p-2 focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/20">
+            <div className="flex items-center gap-2">
+              <label htmlFor="assistant-input" className="sr-only">
+                Ask Gemini AI to search vehicle detections
+              </label>
+              <textarea
+                id="assistant-input"
+                ref={inputRef}
+                rows={1}
+                value={input}
+                onChange={(event) => setInput(event.target.value)}
+                onKeyDown={onKeyDown}
+                placeholder='e.g. "aaj safed car kitni aayin" or "timeline of plate HR26CQ6869"'
+                className="max-h-40 min-h-10 flex-1 resize-none self-center overflow-y-auto border-0 bg-transparent px-2 py-2.5 text-sm leading-5 shadow-none outline-none placeholder:text-muted/70 focus:outline-none focus-visible:outline-none focus:ring-0"
+              />
+              <Button type="submit" variant="danger" icon={faPaperPlane} disabled={!canSend} aria-label="Run AI search">
+                Search
+              </Button>
+            </div>
+          </div>
+          <p className="mt-2 text-xs text-muted">
+            Enter to search, Shift+Enter for a new line. Follow-up questions remember your last 3 AI filter turns.
+          </p>
+        </form>
+
+        {showLog && (
+          <div
+            ref={logRef}
+            role="log"
+            aria-live="polite"
+            aria-label="AI search conversation"
+            className="max-h-[28rem] space-y-4 overflow-y-auto border-t border-line bg-subtle p-5"
+          >
+            {messages.map((message) => (
+              <MessageItem key={message.id} message={message} onInspect={setInspected} />
+            ))}
+            {pending && (
+              <p
+                role="status"
+                className="inline-flex items-center gap-2 rounded-lg border border-line bg-surface px-4 py-2.5 text-sm text-muted"
+              >
+                <FontAwesomeIcon icon={faSpinner} spin />
+                Running AI search…
+              </p>
+            )}
+          </div>
+        )}
+      </Card>
+
+      <DetectionDetailDrawer detection={inspected} onClose={() => setInspected(null)} />
+    </>
   );
 }

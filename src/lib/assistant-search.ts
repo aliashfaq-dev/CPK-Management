@@ -1,313 +1,475 @@
-import { z } from "zod";
-import { getCameras, getDetectionsPage, getFilteredSummary } from "@/lib/data-service";
-import { normalizePlate, parseUtcDate } from "@/lib/detection-query";
-import { VEHICLE_TYPES, VEHICLE_TYPE_LABELS } from "@/lib/constants";
-import type { AssistantReply } from "@/lib/assistant";
-import type { Camera, DetectionFilters } from "@/types";
+import {
+  AI_VEHICLE_LABELS,
+  AI_VEHICLE_TYPES,
+  AiFilterValidationError,
+  buildAppliedFilterChips,
+  buildGeminiSystemPrompt,
+  buildParameterizedSearchPlan,
+  GEMINI_FILTER_RESPONSE_SCHEMA,
+  hasSubstantiveFilter,
+  normalizeQuestionCacheKey,
+  toHistoryWire,
+  validateAndNormalizeAiFilters,
+  type AiVehicleType,
+  type CameraRef,
+  type RawAiFilter,
+  type ValidatedAiFilters,
+} from "@/lib/ai-search-core";
+import type { AssistantGroupRow, AssistantReply } from "@/lib/assistant";
+import { getCameras, rowToDetection } from "@/lib/data-service";
+import { query } from "@/lib/db";
 
 /**
- * Gemini structured-filter assistant (server-only).
+ * Gemini AI-only search orchestrator (server-only).
  *
- * Security invariants:
- * 1. Gemini receives ONLY the user's question, current UTC timestamp, and static schema/camera enums —
- *    NEVER database rows.
- * 2. Gemini outputs ONLY structured filter JSON validated by Zod (`assistantFilterSchema`) — NEVER SQL.
- * 3. Validated fields are bound into parameterized queries in `data-service.ts`.
- * 4. `GEMINI_API_KEY` stays strictly on the server (sent via `x-goog-api-key` header, 15s timeout).
+ * - Uses `GeminiFilterClient` (real HTTP Gemini with 15s timeout + 1 retry in production;
+ *   swappable with a fake client in deterministic tests).
+ * - Caches normalized `(question + last3History) -> ValidatedAiFilters` for 5 minutes.
+ * - Caches `(canonical ValidatedAiFilters + pgTrgm) -> AssistantReply` for 30 seconds.
+ * - Runs independent SQL count, group, and row queries in parallel (`Promise.all`).
  */
 
 const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
 const GEMINI_TIMEOUT_MS = 15_000;
+const QUESTION_CACHE_TTL_MS = 5 * 60_000;
+const RESULT_CACHE_TTL_MS = 30_000;
+const MAX_CACHE_ENTRIES = 500;
 
 const URDU_HINT =
-  /\b(kya|kahan|dikhao|dikha|mujhe|gaari|gari|gaadi|aaj|kal|safed|kala|neela|laal|hai|hain|mein|ki|ka|ke|ko|se|par|talash|dhoondo|dhundo|wali|wala|kitni|kitne|batao|batayein|kul)\b/i;
+  /\b(kya|kahan|dikhao|dikha|mujhe|gaari|gari|gaadi|aaj|kal|safed|kala|neela|laal|hai|hain|mein|ki|ka|ke|ko|se|par|talash|dhoondo|dhundo|wali|wala|kitni|kitne|batao|batayein|kul|unmein|raat|hafte|ghante)\b/i;
 
-export const assistantFilterSchema = z.object({
-  intent: z.enum(["search", "count", "summary"]),
-  language: z.enum(["en", "roman_urdu"]).optional(),
-  plate: z.string().trim().max(24).nullable().optional(),
-  vehicle_type: z.enum(["car", "rickshaw", "htv", "van", "pickup", "bike"]).nullable().optional(),
-  colour: z.string().trim().max(40).nullable().optional(),
-  camera: z.string().trim().max(80).nullable().optional(),
-  from: z.string().trim().max(40).nullable().optional(),
-  to: z.string().trim().max(40).nullable().optional(),
-  has_plate: z.boolean().nullable().optional(),
-  limit: z.number().int().min(1).max(20).nullable().optional(),
-});
-
-type StructuredAssistantQuery = z.infer<typeof assistantFilterSchema>;
-
-const GEMINI_RESPONSE_SCHEMA = {
-  type: "OBJECT",
-  properties: {
-    intent: { type: "STRING", enum: ["search", "count", "summary"] },
-    language: { type: "STRING", enum: ["en", "roman_urdu"] },
-    plate: { type: "STRING", nullable: true },
-    vehicle_type: { type: "STRING", enum: ["car", "rickshaw", "htv", "van", "pickup", "bike"], nullable: true },
-    colour: { type: "STRING", nullable: true },
-    camera: { type: "STRING", nullable: true },
-    from: { type: "STRING", nullable: true },
-    to: { type: "STRING", nullable: true },
-    has_plate: { type: "BOOLEAN", nullable: true },
-    limit: { type: "INTEGER", nullable: true },
-  },
-  required: ["intent", "language"],
-};
-
-function safeFallbackReply(urdu: boolean, reason: "unconfigured" | "unclear" | "unavailable"): AssistantReply {
-  if (reason === "unconfigured") {
-    return {
-      text: urdu
-        ? "Assistant abhi configure nahi hai (server par GEMINI_API_KEY set nahi hai). Tab tak upar ke filters se search karein."
-        : "The assistant is not configured on the server (GEMINI_API_KEY is not set). Use the table filters to search detections.",
-      results: [],
-      total: 0,
-    };
-  }
-  if (reason === "unavailable") {
-    return {
-      text: urdu
-        ? "Assistant se abhi jawab nahi mil saka. Kuch dair baad dobara koshish karein ya table filters istemal karein."
-        : "The assistant could not process that request right now. Try again shortly or use the table filters.",
-      results: [],
-      total: 0,
-    };
-  }
-  return {
-    text: urdu
-      ? "Search ke liye koi detail batayein — jaise plate number, gaari ki type (car, rickshaw, htv, van, pickup, bike), colour, camera, ya waqt (aaj, kal)."
-      : "Include at least one detail to search: a plate number, vehicle type (car, rickshaw, htv, van, pickup, bike), colour, camera, or time range.",
-    results: [],
-    total: 0,
-  };
+export interface GeminiExtractRequest {
+  question: string;
+  now: Date;
+  cameras: readonly CameraRef[];
+  history: readonly RawAiFilter[];
 }
 
-function resolveCameraId(raw: string | null | undefined, cameras: Camera[]): { id: string; label: string } | null {
-  const trimmed = raw?.trim();
-  if (!trimmed) return null;
-  const lower = trimmed.toLowerCase();
-  const exact = cameras.find((c) => c.id.toLowerCase() === lower);
-  if (exact) return { id: exact.id, label: exact.name };
-  const byName = cameras.filter(
-    (c) => c.name.toLowerCase().includes(lower) || c.location.toLowerCase().includes(lower),
-  );
-  if (byName.length === 1) return { id: byName[0].id, label: byName[0].name };
-  return null;
+export interface GeminiFilterClient {
+  extractFilters(req: GeminiExtractRequest): Promise<unknown>;
 }
 
-function hrefForFilters(filters: DetectionFilters): string {
-  const params = new URLSearchParams();
-  if (filters.plate) params.set("q", filters.plate);
-  if (filters.type) params.set("type", filters.type);
-  if (filters.camera) params.set("camera", filters.camera);
-  if (filters.colour) params.set("colour", filters.colour);
-  if (filters.from) params.set("from", filters.from.slice(0, 10));
-  if (filters.to) {
-    const inclusiveEnd = new Date(Math.max(Date.parse(filters.from ?? filters.to), Date.parse(filters.to) - 86_400_000));
-    params.set("to", inclusiveEnd.toISOString().slice(0, 10));
+export class GeminiUnavailableError extends Error {
+  constructor(message = "AI search unavailable") {
+    super(message);
+    this.name = "GeminiUnavailableError";
   }
-  if (filters.hasPlate !== undefined) params.set("hasPlate", filters.hasPlate ? "yes" : "no");
-  const qs = params.toString();
-  return qs ? `/detections?${qs}` : "/detections";
 }
 
-async function extractFiltersWithGemini(
+async function callGeminiOnce(
+  apiKey: string,
+  model: string,
+  systemInstruction: string,
   question: string,
-  cameras: Camera[],
-): Promise<{ ok: true; data: StructuredAssistantQuery } | { ok: false; reason: "unconfigured" | "unavailable" }> {
-  const apiKey = process.env.GEMINI_API_KEY?.trim();
-  if (!apiKey) {
-    return { ok: false, reason: "unconfigured" };
-  }
-  const model = (process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL).replace(/[^a-zA-Z0-9._-]/g, "");
-  const nowIso = new Date().toISOString();
-  const cameraList = cameras.slice(0, 50).map((c) => `${c.id} (${c.name}, ${c.location})`).join("; ") || "none registered";
-
-  const systemInstruction = [
-    "You convert a user's vehicle-detection question (in English or Roman Urdu) into a JSON filter object.",
-    `Current UTC time: ${nowIso}.`,
-    `Allowed vehicle_type values ONLY: ${VEHICLE_TYPES.join(", ")}. Map motorcycle/motorbike -> bike; truck/bus/trailer/lorry -> htv; riksha/chingchi -> rickshaw.`,
-    "Translate Roman Urdu colours to English colour names (safed->White, kala->Black, laal->Red, neela->Blue, hara->Green, peela->Yellow).",
-    `Registered cameras: ${cameraList}. Set "camera" to the exact camera_id when one matches, else null.`,
-    'For "from" and "to", emit ISO-8601 UTC timestamps (e.g. 2026-11-26T00:00:00Z) or YYYY-MM-DD when the user mentions a time window ("today"/"aaj", "yesterday"/"kal", "last hour"/"pichla ghanta"). Note "to" is exclusive when an exact timestamp is given, or YYYY-MM-DD for a calendar date.',
-    'Set intent="count" when the user asks how many ("kitni", "how many", "count"), intent="summary" when asking for an overview/breakdown ("summary", "kaisa raha", "breakdown"), otherwise intent="search".',
-    'Set language="roman_urdu" when the user writes in Roman Urdu/Urdu, otherwise "en".',
-  ].join("\n");
-
-  let response: Response;
-  try {
-    response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": apiKey,
-        },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: systemInstruction }] },
-          contents: [{ role: "user", parts: [{ text: question }] }],
-          generationConfig: {
-            temperature: 0,
-            maxOutputTokens: 300,
-            responseMimeType: "application/json",
-            responseSchema: GEMINI_RESPONSE_SCHEMA,
-          },
-        }),
-        signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
+): Promise<unknown> {
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": apiKey,
       },
-    );
-  } catch {
-    return { ok: false, reason: "unavailable" };
-  }
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: systemInstruction }] },
+        contents: [{ role: "user", parts: [{ text: question }] }],
+        generationConfig: {
+          temperature: 0,
+          maxOutputTokens: 400,
+          responseMimeType: "application/json",
+          responseSchema: GEMINI_FILTER_RESPONSE_SCHEMA,
+        },
+      }),
+      signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
+    },
+  );
 
   if (!response.ok) {
-    return { ok: false, reason: "unavailable" };
+    throw new GeminiUnavailableError(`Gemini HTTP ${response.status}`);
   }
 
-  try {
-    const payload = (await response.json()) as {
-      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+  const payload = (await response.json()) as {
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+  };
+  const rawText = payload.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? "";
+  if (!rawText) {
+    throw new GeminiUnavailableError("Empty Gemini candidate");
+  }
+  return JSON.parse(rawText) as unknown;
+}
+
+export const httpGeminiClient: GeminiFilterClient = {
+  async extractFilters({ question, now, cameras, history }) {
+    const apiKey = process.env.GEMINI_API_KEY?.trim();
+    if (!apiKey) {
+      throw new GeminiUnavailableError("GEMINI_API_KEY not configured");
+    }
+    const model = (process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL).replace(
+      /[^a-zA-Z0-9._-]/g,
+      "",
+    );
+    const systemPrompt = buildGeminiSystemPrompt(now, cameras, history);
+
+    // 1 retry on transient timeout/5xx/parse failure
+    try {
+      return await callGeminiOnce(apiKey, model, systemPrompt, question);
+    } catch {
+      return await callGeminiOnce(apiKey, model, systemPrompt, question);
+    }
+  },
+};
+
+interface TimedEntry<T> {
+  value: T;
+  expiresAt: number;
+}
+
+interface AiSearchCacheStore {
+  questionCache: Map<string, TimedEntry<ValidatedAiFilters>>;
+  resultCache: Map<string, TimedEntry<AssistantReply>>;
+  pgTrgm?: boolean;
+}
+
+interface AiGlobals {
+  __cpkAiSearch?: AiSearchCacheStore;
+}
+const globalStore = globalThis as typeof globalThis & AiGlobals;
+
+function getCacheStore(): AiSearchCacheStore {
+  if (!globalStore.__cpkAiSearch) {
+    globalStore.__cpkAiSearch = {
+      questionCache: new Map(),
+      resultCache: new Map(),
     };
-    const rawText = payload.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? "";
-    if (!rawText) return { ok: false, reason: "unavailable" };
-    const parsedJson: unknown = JSON.parse(rawText);
-    const validated = assistantFilterSchema.safeParse(parsedJson);
-    if (!validated.success) return { ok: false, reason: "unavailable" };
-    return { ok: true, data: validated.data };
-  } catch {
-    return { ok: false, reason: "unavailable" };
+  }
+  return globalStore.__cpkAiSearch;
+}
+
+function getCached<T>(map: Map<string, TimedEntry<T>>, key: string): T | undefined {
+  const hit = map.get(key);
+  if (!hit) return undefined;
+  if (hit.expiresAt <= Date.now()) {
+    map.delete(key);
+    return undefined;
+  }
+  return hit.value;
+}
+
+function setCached<T>(map: Map<string, TimedEntry<T>>, key: string, value: T, ttlMs: number): void {
+  map.delete(key);
+  map.set(key, { value, expiresAt: Date.now() + ttlMs });
+  if (map.size > MAX_CACHE_ENTRIES) {
+    const firstKey = map.keys().next().value;
+    if (firstKey !== undefined) map.delete(firstKey);
   }
 }
 
-export async function answerAssistantQuestion(question: string): Promise<AssistantReply> {
-  const fallbackUrdu = URDU_HINT.test(question);
-  const cameras = await getCameras();
+async function detectPgTrgm(): Promise<boolean> {
+  const store = getCacheStore();
+  if (store.pgTrgm !== undefined) return store.pgTrgm;
+  try {
+    const res = await query<{ ok: boolean }>(
+      "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm') AS ok",
+    );
+    store.pgTrgm = Boolean(res.rows[0]?.ok);
+  } catch {
+    store.pgTrgm = false;
+  }
+  return store.pgTrgm;
+}
 
-  const extracted = await extractFiltersWithGemini(question, cameras);
-  if (!extracted.ok) {
-    return safeFallbackReply(fallbackUrdu, extracted.reason);
+function buildFilterUrlParams(filters: ValidatedAiFilters): URLSearchParams {
+  const params = new URLSearchParams();
+  if (filters.plate) {
+    params.set("q", filters.plate);
+    params.set("plateMode", filters.plateMode);
   }
+  if (filters.vehicleTypes.length === 1) {
+    params.set("type", filters.vehicleTypes[0]);
+  } else if (filters.vehicleTypes.length > 1) {
+    params.set("types", filters.vehicleTypes.join(","));
+  }
+  if (filters.colours.length === 1) {
+    params.set("colour", filters.colours[0]);
+  } else if (filters.colours.length > 1) {
+    params.set("colours", filters.colours.join(","));
+  }
+  if (filters.make) params.set("make", filters.make);
+  if (filters.model) params.set("model", filters.model);
+  if (filters.camera) params.set("camera", filters.camera);
+  if (filters.from) params.set("from", filters.from);
+  if (filters.to) params.set("to", filters.to);
+  if (filters.hasPlate !== undefined) params.set("hasPlate", filters.hasPlate ? "yes" : "no");
+  if (filters.minConfidence !== undefined) params.set("minConfidence", String(filters.minConfidence));
+  return params;
+}
 
-  const structured = extracted.data;
-  const urdu = structured.language === "roman_urdu" || fallbackUrdu;
-  const filters: DetectionFilters = {};
-  const parts: string[] = [];
-
-  if (structured.plate) {
-    const norm = normalizePlate(structured.plate);
-    if (norm) {
-      filters.plate = norm.slice(0, 15);
-      parts.push(`plate ${filters.plate}`);
-    }
-  }
-  if (structured.vehicle_type) {
-    filters.type = structured.vehicle_type;
-    parts.push(VEHICLE_TYPE_LABELS[structured.vehicle_type]);
-  }
-  if (structured.colour) {
-    const cleanColour = structured.colour.replace(/[^a-zA-Z\s-]/g, "").trim();
-    if (cleanColour) {
-      filters.colour = cleanColour.slice(0, 30);
-      parts.push(filters.colour.toLowerCase());
-    }
-  }
-  const resolvedCam = resolveCameraId(structured.camera, cameras);
-  if (resolvedCam) {
-    filters.camera = resolvedCam.id;
-    parts.push(resolvedCam.label);
-  }
-  if (structured.from) {
-    const fromIso = parseUtcDate(structured.from, false);
-    if (fromIso) {
-      filters.from = fromIso;
-      parts.push(`from ${fromIso.slice(0, 16).replace("T", " ")} UTC`);
-    }
-  }
-  if (structured.to) {
-    const isDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(structured.to);
-    const toIso = parseUtcDate(structured.to, isDateOnly);
-    if (toIso) {
-      filters.to = toIso;
-      parts.push(`to ${toIso.slice(0, 16).replace("T", " ")} UTC`);
-    }
-  }
-  if (typeof structured.has_plate === "boolean") {
-    filters.hasPlate = structured.has_plate;
-    parts.push(structured.has_plate ? (urdu ? "plate ke sath" : "with plate") : (urdu ? "bina plate" : "without plate"));
-  }
-
-  const hasAnyFilter = Object.values(filters).some((v) => v !== undefined);
-  if (!hasAnyFilter && structured.intent === "search") {
-    return safeFallbackReply(urdu, "unclear");
-  }
-
-  const limit = Math.min(10, Math.max(1, structured.limit ?? 5));
-  const filterLabel = parts.join(", ") || (urdu ? "sab records" : "all records");
-  const href = hrefForFilters(filters);
-
-  if (structured.intent === "summary") {
-    const [summary, recentPage] = await Promise.all([
-      getFilteredSummary(filters),
-      getDetectionsPage({ ...filters, page: 1, pageSize: 5, sort: "detectedAt", dir: "desc" }),
-    ]);
-    if (summary.total === 0) {
-      return {
-        text: urdu
-          ? `${filterLabel} ke liye koi detection record nahi mila.`
-          : `No detections matched ${filterLabel}.`,
-        results: [],
-        total: 0,
-      };
-    }
-    const breakdown = VEHICLE_TYPES.filter((t) => summary.byType[t] > 0)
-      .map((t) => `${VEHICLE_TYPE_LABELS[t]}: ${summary.byType[t]}`)
-      .join(", ");
-    return {
-      text: urdu
-        ? `Kul ${summary.total} detections mili (${filterLabel}) — plate read: ${summary.withPlate}. Iqsaam: ${breakdown}.`
-        : `Summary for ${filterLabel}: ${summary.total} total detections (${summary.withPlate} with readable plates). Breakdown: ${breakdown}.`,
-      results: recentPage.rows,
-      total: summary.total,
-      href,
-    };
-  }
-
-  const page = await getDetectionsPage({
-    ...filters,
-    page: 1,
-    pageSize: limit,
-    sort: "detectedAt",
-    dir: "desc",
-  });
-
-  if (page.total === 0) {
-    return {
-      text: urdu
-        ? `“${filterLabel}” ke liye koi detection nahi mili. Plate ya time range badal kar dobara dekhein.`
-        : `No detections found for ${filterLabel}. Check the plate or widen the time range.`,
-      results: [],
-      total: 0,
-    };
-  }
-
-  if (structured.intent === "count") {
-    return {
-      text: urdu
-        ? `${filterLabel} ke liye kul ${page.total} detection${page.total === 1 ? "" : "s"} darj hain. Taza tareen ${page.rows.length} neeche hain.`
-        : `There ${page.total === 1 ? "is" : "are"} ${page.total} detection${page.total === 1 ? "" : "s"} matching ${filterLabel}. Showing the ${page.rows.length} most recent.`,
-      results: page.rows,
-      total: page.total,
-      href,
-    };
-  }
-
+function unavailableReply(urdu: boolean): AssistantReply {
   return {
     text: urdu
-      ? `${page.total} detection mili (${filterLabel}). Sab se nayi ${page.rows.length} neeche dikhayi gayi hain.`
-      : `Found ${page.total} detection${page.total === 1 ? "" : "s"} for ${filterLabel}. Showing the ${page.rows.length} most recent.`,
-    results: page.rows,
-    total: page.total,
-    href,
+      ? "AI search abhi available nahi — server par GEMINI_API_KEY check karein ya thori dair baad dobara koshish karein."
+      : "AI search abhi available nahi (AI search is currently unavailable — verify GEMINI_API_KEY on the server or try again shortly).",
+    results: [],
+    total: 0,
+    chips: [],
+    unavailable: true,
   };
+}
+
+export async function answerAssistantQuestion(
+  question: string,
+  rawHistory: readonly RawAiFilter[] = [],
+  options: {
+    client?: GeminiFilterClient;
+    now?: Date;
+    bypassCache?: boolean;
+  } = {},
+): Promise<AssistantReply> {
+  const fallbackUrdu = URDU_HINT.test(question);
+  const store = getCacheStore();
+  const now = options.now ?? new Date();
+  const client = options.client ?? httpGeminiClient;
+
+  const [cameras, pgTrgm] = await Promise.all([getCameras(), detectPgTrgm()]);
+
+  // Re-validate up to the last 3 previous filter turns so invalid client state is ignored.
+  const validHistory: ValidatedAiFilters[] = [];
+  for (const item of rawHistory.slice(-3)) {
+    try {
+      validHistory.push(validateAndNormalizeAiFilters(item, cameras));
+    } catch {
+      /* ignore malformed client history entry */
+    }
+  }
+  const wireHistory = validHistory.map(toHistoryWire);
+  const previousTurn = validHistory[validHistory.length - 1];
+
+  const qKey = normalizeQuestionCacheKey(question, wireHistory);
+  let filters = options.bypassCache ? undefined : getCached(store.questionCache, qKey);
+
+  if (!filters) {
+    let rawGeminiOutput: unknown;
+    try {
+      rawGeminiOutput = await client.extractFilters({
+        question,
+        now,
+        cameras,
+        history: wireHistory,
+      });
+    } catch {
+      return unavailableReply(fallbackUrdu);
+    }
+
+    try {
+      filters = validateAndNormalizeAiFilters(rawGeminiOutput, cameras, previousTurn);
+    } catch (error) {
+      if (error instanceof AiFilterValidationError) {
+        return {
+          text: fallbackUrdu
+            ? `Sawal ki filter conditions durust nahi hain (${error.message}). Naya sawal likh kar dobara koshish karein.`
+            : `Could not run that search (${error.message}). Rephrase your question within a 1-year date range.`,
+          results: [],
+          total: 0,
+          chips: [],
+        };
+      }
+      return unavailableReply(fallbackUrdu);
+    }
+
+    if (!options.bypassCache) {
+      setCached(store.questionCache, qKey, filters, QUESTION_CACHE_TTL_MS);
+    }
+  }
+
+  const urdu = filters.language === "roman_urdu" || fallbackUrdu;
+  const chips = buildAppliedFilterChips(filters);
+  const appliedFilter = toHistoryWire(filters);
+
+  if (!hasSubstantiveFilter(filters) && filters.intent === "search") {
+    return {
+      text: urdu
+        ? "Search ke liye koi detail likhein — jaise plate number, gaari ki qisam (car, rickshaw, htv, van, pickup, bike), rang, camera, ya waqt (aaj, kal, pichle 2 ghante)."
+        : "Describe what to search for — a plate number, vehicle type (car, rickshaw, htv, van, pickup, bike), colour, make, camera, or time window.",
+      results: [],
+      total: 0,
+      chips,
+      appliedFilter,
+    };
+  }
+
+  const resultCacheKey = `${pgTrgm ? "trgm1" : "trgm0"}:${JSON.stringify(appliedFilter)}`;
+  if (!options.bypassCache) {
+    const cachedReply = getCached(store.resultCache, resultCacheKey);
+    if (cachedReply) {
+      return cachedReply;
+    }
+  }
+
+  const plan = buildParameterizedSearchPlan(filters, { pgTrgm });
+  const qs = buildFilterUrlParams(filters).toString();
+  const href = qs ? `/detections?${qs}` : "/detections";
+  const exportHref = qs ? `/api/detections/export?${qs}` : "/api/detections/export";
+
+  let reply: AssistantReply;
+
+  if (filters.intent === "summary") {
+    const withPlateJoiner = plan.whereClause ? `${plan.whereClause} AND v.has_plate` : "WHERE v.has_plate";
+    const [countRes, withPlateRes, byTypeRes, rowsRes] = await Promise.all([
+      query<{ total: number }>(plan.countSql.text, plan.countSql.params),
+      query<{ total: number }>(
+        `SELECT COUNT(*)::int AS total FROM public.v_events_dashboard v ${withPlateJoiner}`,
+        plan.countSql.params,
+      ),
+      query<{ label: string; count: number }>(
+        `SELECT v.vehicle_type AS label, COUNT(*)::int AS count
+         FROM public.v_events_dashboard v ${plan.whereClause}
+         GROUP BY v.vehicle_type ORDER BY count DESC`,
+        plan.countSql.params,
+      ),
+      query<Record<string, unknown>>(plan.rowsSql.text, plan.rowsSql.params),
+    ]);
+
+    const total = Number(countRes.rows[0]?.total ?? 0);
+    const withPlate = Number(withPlateRes.rows[0]?.total ?? 0);
+    const results = rowsRes.rows.map(rowToDetection);
+    const groups: AssistantGroupRow[] = byTypeRes.rows.map((r) => ({
+      label: AI_VEHICLE_LABELS[r.label as AiVehicleType] ?? r.label,
+      count: Number(r.count),
+    }));
+
+    if (total === 0) {
+      reply = {
+        text: urdu ? "Is muddat/filter ke liye koi detection record nahi mila." : "No detections matched this summary filter.",
+        results: [],
+        total: 0,
+        chips,
+        appliedFilter,
+      };
+    } else {
+      const breakdown = groups.map((g) => `${g.label}: ${g.count}`).join(", ");
+      const typesPresent = AI_VEHICLE_TYPES.length;
+      void typesPresent;
+      reply = {
+        text: urdu
+          ? `Kul ${total} detections mili (plate read: ${withPlate}). Tafseel: ${breakdown}.`
+          : `Summary: ${total} detections (${withPlate} with readable plates). Breakdown: ${breakdown}.`,
+        results,
+        total,
+        chips,
+        groups,
+        appliedFilter,
+        href,
+        exportHref,
+      };
+    }
+  } else if (
+    (filters.intent === "group_by_camera" ||
+      filters.intent === "group_by_type" ||
+      filters.intent === "top_plates") &&
+    plan.groupSql
+  ) {
+    const [countRes, groupRes, rowsRes] = await Promise.all([
+      query<{ total: number }>(plan.countSql.text, plan.countSql.params),
+      query<{ label: string; count: number }>(plan.groupSql.text, plan.groupSql.params),
+      query<Record<string, unknown>>(plan.rowsSql.text, plan.rowsSql.params),
+    ]);
+
+    const total = Number(countRes.rows[0]?.total ?? 0);
+    const results = rowsRes.rows.map(rowToDetection);
+    const groups: AssistantGroupRow[] = groupRes.rows.map((r) => ({
+      label:
+        filters.intent === "group_by_type"
+          ? (AI_VEHICLE_LABELS[r.label as AiVehicleType] ?? r.label)
+          : String(r.label),
+      count: Number(r.count),
+    }));
+
+    if (groups.length === 0) {
+      reply = {
+        text: urdu ? "In filters ke mutabiq koi record nahi mila." : "No matching records found for that grouping.",
+        results: [],
+        total: 0,
+        chips,
+        appliedFilter,
+      };
+    } else {
+      const topSummary = groups
+        .slice(0, 4)
+        .map((g) => `${g.label} (${g.count})`)
+        .join(", ");
+      reply = {
+        text: urdu
+          ? `Kul ${total} detections — numayan nataij: ${topSummary}.`
+          : `${total} total detections — top results: ${topSummary}.`,
+        results,
+        total,
+        chips,
+        groups,
+        appliedFilter,
+        href,
+        exportHref,
+      };
+    }
+  } else {
+    const [countRes, rowsRes] = await Promise.all([
+      query<{ total: number }>(plan.countSql.text, plan.countSql.params),
+      query<Record<string, unknown>>(plan.rowsSql.text, plan.rowsSql.params),
+    ]);
+
+    const total = Number(countRes.rows[0]?.total ?? 0);
+    const results = rowsRes.rows.map(rowToDetection);
+
+    if (total === 0) {
+      reply = {
+        text: urdu
+          ? "In filters ke mutabiq koi detection nahi mili. Naya sawal likh kar dobara dekhein."
+          : "No detections matched these filters. Try phrasing a broader search.",
+        results: [],
+        total: 0,
+        chips,
+        appliedFilter,
+      };
+    } else if (filters.intent === "count") {
+      reply = {
+        text: urdu
+          ? `Kul ${total} detection${total === 1 ? "" : "s"} mili hain.`
+          : `Matched ${total} detection${total === 1 ? "" : "s"}.`,
+        results: results.slice(0, 5),
+        total,
+        chips,
+        appliedFilter,
+        href,
+        exportHref,
+      };
+    } else if (filters.intent === "timeline_of_plate") {
+      reply = {
+        text: urdu
+          ? `Plate ${filters.plate ?? ""} ki ${total} sightings mili hain (waqt ki tarteeb se neeche hain).`
+          : `Found ${total} sighting${total === 1 ? "" : "s"} in chronological order.`,
+        results,
+        total,
+        chips,
+        appliedFilter,
+        href,
+        exportHref,
+      };
+    } else {
+      reply = {
+        text: urdu
+          ? `${total} detection${total === 1 ? "" : "s"} mili — taza tareen ${results.length} neeche dikhayi gayi hain.`
+          : `Found ${total} detection${total === 1 ? "" : "s"} — showing ${results.length}.`,
+        results,
+        total,
+        chips,
+        appliedFilter,
+        href,
+        exportHref,
+      };
+    }
+  }
+
+  if (!options.bypassCache) {
+    setCached(store.resultCache, resultCacheKey, reply, RESULT_CACHE_TTL_MS);
+  }
+  return reply;
 }

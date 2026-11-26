@@ -10,11 +10,10 @@ import { VehicleThumbnail } from "@/components/detections/VehicleThumbnail";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { SearchInput } from "@/components/ui/SearchInput";
 import { Select } from "@/components/ui/Select";
 import { useEscape } from "@/hooks/useEscape";
 import { useLiveDetectionSubscription } from "@/hooks/useLiveEvents";
-import { matchesCamera, sortByCameraNumber } from "@/lib/cameras";
+import { sortByCameraNumber } from "@/lib/cameras";
 import { VEHICLE_TYPE_LABELS } from "@/lib/constants";
 import { formatTimeWithSeconds } from "@/lib/utils";
 const FullscreenCameraModal = dynamic(
@@ -58,7 +57,6 @@ export function LiveCameraView({
   const [tabs, setTabs] = useState<WorkspaceTab[]>([]);
   const [activeId, setActiveId] = useState(HOME_ID);
   const [perScreen, setPerScreen] = useState<number>(DEFAULT_PER_SCREEN);
-  const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [showRecent, setShowRecent] = useState(true);
   const [fullscreenId, setFullscreenId] = useState<string | null>(null);
@@ -67,7 +65,6 @@ export function LiveCameraView({
   useEffect(() => setCameras(initialCameras), [initialCameras]);
   useEffect(() => setDetections(initialDetections), [initialDetections]);
 
-  // Poll pipeline stream statuses every 3s while visible so running/stopped/fps badges stay current.
   useEffect(() => {
     if (!pipelineConfigured) return;
     let cancelled = false;
@@ -172,8 +169,8 @@ export function LiveCameraView({
   );
 
   const filtered = useMemo(
-    () => sortByCameraNumber(sourceCameras.filter((camera) => (statusFilter === "all" || camera.status === statusFilter) && matchesCamera(camera, query))),
-    [sourceCameras, statusFilter, query],
+    () => sortByCameraNumber(sourceCameras.filter((camera) => statusFilter === "all" || camera.status === statusFilter)),
+    [sourceCameras, statusFilter],
   );
 
   const maxPerScreen = isEmptyTab ? MAX_GRID_SIZE : Math.min(Math.max(filtered.length, 1), MAX_GRID_SIZE);
@@ -215,29 +212,16 @@ export function LiveCameraView({
       const first = cameraById.get(ids[0]);
       const title = first ? (ids.length > 1 ? `${first.name} +${ids.length - 1}` : first.name) : "New View";
       setTabs((current) => current.map((tab) => (tab.id === activeId ? { ...tab, cameraIds: ids, title } : tab)));
-      setQuery("");
       setStatusFilter("all");
     },
     [activeId, cameraById],
   );
-
-  const clearFilters = useCallback(() => {
-    setQuery("");
-    setStatusFilter("all");
-  }, []);
 
   return (
     <>
       <div className="flex h-[calc(100dvh-6rem)] min-h-0 flex-col gap-3 md:h-[calc(100dvh-7rem)]">
         <Card className="shrink-0">
           <div className="flex flex-wrap items-center gap-3 p-3">
-            <SearchInput
-              value={query}
-              onChange={setQuery}
-              label="Filter this tab by area or camera name"
-              placeholder="Filter this tab: area or camera"
-              className="w-full sm:w-72"
-            />
             <div className="w-40">
               <Select aria-label="Status filter" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)} options={STATUS_OPTIONS} />
             </div>
@@ -287,10 +271,10 @@ export function LiveCameraView({
                   <EmptyState
                     icon={faVideoSlash}
                     title="No cameras match"
-                    description="Nothing in this view matches the current filter."
+                    description="No cameras in this view match the selected status."
                     action={
-                      <Button icon={faXmark} onClick={clearFilters}>
-                        Clear filters
+                      <Button icon={faXmark} onClick={() => setStatusFilter("all")}>
+                        Show all statuses
                       </Button>
                     }
                   />

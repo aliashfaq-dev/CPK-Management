@@ -1,21 +1,19 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useRef, useState, useTransition, type ChangeEvent, type FormEvent } from "react";
-import { faImage, faMagnifyingGlass, faRotateLeft, faUpload, faXmark } from "@fortawesome/free-solid-svg-icons";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { useCallback, useTransition } from "react";
+import { faCarSide, faXmark } from "@fortawesome/free-solid-svg-icons";
 import type { Camera, Detection, DetectionFilters, Page, Vehicle } from "@/types";
 import { PlateTag } from "@/components/detections/PlateTag";
 import { VehicleThumbnail } from "@/components/detections/VehicleThumbnail";
+import { AssistantChat } from "@/components/ui/AssistantChat";
 import { Button } from "@/components/ui/Button";
 import { ChartCard } from "@/components/ui/ChartCard";
 import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { Input } from "@/components/ui/Input";
-import { Select } from "@/components/ui/Select";
 import { Pagination } from "@/components/ui/Pagination";
 import { StatusBadge } from "@/components/ui/StatusBadge";
-import { VEHICLE_TYPES, VEHICLE_TYPE_LABELS } from "@/lib/constants";
+import { VEHICLE_TYPE_LABELS } from "@/lib/constants";
 import { filtersToParams } from "@/lib/detection-query";
 import { cn, formatDateTime, vehicleDescription } from "@/lib/utils";
 import { DetectionTimeline } from "./DetectionTimeline";
@@ -31,35 +29,42 @@ interface FindFlagViewProps {
   sightingsPage: number;
 }
 
-/** Search criteria, the selected vehicle and both page numbers live in the URL. */
-export function FindFlagView({ filters, vehicles, selected, sightings, cameraBreakdown, cameras, sightingsPage }: FindFlagViewProps) {
+function hasAnyFilter(f: DetectionFilters): boolean {
+  return Object.values(f).some((v) =>
+    Array.isArray(v) ? v.length > 0 : v !== undefined,
+  );
+}
+
+/** AI-only vehicle finder: Gemini updates URL filter params; vehicle cards, timeline, and camera stats follow. */
+export function FindFlagView({
+  filters,
+  vehicles,
+  selected,
+  sightings,
+  cameraBreakdown,
+  cameras,
+  sightingsPage,
+}: FindFlagViewProps) {
   const router = useRouter();
   const pathname = usePathname();
   const [pending, startTransition] = useTransition();
-  const [draft, setDraft] = useState({
-    plate: filters.plate ?? "",
-    type: filters.type ?? "all",
-    camera: filters.camera ?? "all",
-    from: filters.from?.slice(0, 10) ?? "",
-    to: filters.to ? new Date(Date.parse(filters.to) - 86_400_000).toISOString().slice(0, 10) : "",
-  });
-  const [image, setImage] = useState<{ url: string; name: string } | null>(null);
 
-  // Revoke the preview URL when the page unmounts (replace/clear are handled below).
-  const imageUrlRef = useRef<string | null>(null);
-  useEffect(() => {
-    imageUrlRef.current = image?.url ?? null;
-  }, [image]);
-  useEffect(() => () => {
-    if (imageUrlRef.current) URL.revokeObjectURL(imageUrlRef.current);
-  }, []);
+  const push = useCallback(
+    (params: URLSearchParams) => {
+      const search = params.toString();
+      startTransition(() => router.push(search ? `${pathname}?${search}` : pathname));
+    },
+    [pathname, router],
+  );
 
-  const update = (patch: Partial<typeof draft>) => setDraft((current) => ({ ...current, ...patch }));
-
-  const push = (params: URLSearchParams) => {
-    const search = params.toString();
-    startTransition(() => router.push(search ? `${pathname}?${search}` : pathname));
-  };
+  const onAiFilterHref = useCallback(
+    (href: string) => {
+      const qIndex = href.indexOf("?");
+      const qs = qIndex >= 0 ? href.slice(qIndex + 1) : "";
+      startTransition(() => router.push(qs ? `${pathname}?${qs}` : pathname));
+    },
+    [pathname, router],
+  );
 
   const currentParams = (extra: Record<string, string | undefined> = {}) => {
     const params = filtersToParams(filters);
@@ -70,97 +75,43 @@ export function FindFlagView({ filters, vehicles, selected, sightings, cameraBre
     return params;
   };
 
-  const onImageChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (image) URL.revokeObjectURL(image.url);
-    setImage(file ? { url: URL.createObjectURL(file), name: file.name } : null);
-  };
-
-  const clearImage = () => {
-    if (image) URL.revokeObjectURL(image.url);
-    setImage(null);
-  };
-
-  const onSubmit = (event: FormEvent) => {
-    event.preventDefault();
-    const params = new URLSearchParams();
-    if (draft.plate.trim()) params.set("q", draft.plate.trim());
-    if (draft.type !== "all") params.set("type", draft.type);
-    if (draft.camera !== "all") params.set("camera", draft.camera);
-    if (draft.from) params.set("from", draft.from);
-    if (draft.to) params.set("to", draft.to);
-    push(params);
-  };
-
-  const onReset = () => {
-    setDraft({ plate: "", type: "all", camera: "all", from: "", to: "" });
-    clearImage();
-    push(new URLSearchParams());
-  };
-
   const cameraById = new Map(cameras.map((camera) => [camera.id, camera]));
+  const filtered = hasAnyFilter(filters);
 
   return (
     <>
-      <Card className="mb-6">
-        <form onSubmit={onSubmit} className="grid gap-5 p-5 lg:grid-cols-3">
-          <div className="grid gap-3 sm:grid-cols-2 lg:col-span-2">
-            <Input label="License plate" placeholder="e.g. BKL-2847" value={draft.plate} onChange={(e) => update({ plate: e.target.value })} />
-            <Select
-              label="Vehicle type"
-              value={draft.type}
-              onChange={(e) => update({ type: e.target.value })}
-              options={[{ value: "all", label: "Any type" }, ...VEHICLE_TYPES.map((type) => ({ value: type, label: VEHICLE_TYPE_LABELS[type] }))]}
-            />
-            <Input type="date" label="From (UTC)" value={draft.from} onChange={(e) => update({ from: e.target.value })} />
-            <Input type="date" label="To (UTC)" value={draft.to} onChange={(e) => update({ to: e.target.value })} />
-            <div className="sm:col-span-2">
-              <Select
-                label="Camera"
-                value={draft.camera}
-                onChange={(e) => update({ camera: e.target.value })}
-                options={[{ value: "all", label: "Any camera" }, ...cameras.map((c) => ({ value: c.id, label: `${c.id} · ${c.name}` }))]}
-              />
-            </div>
-          </div>
+      <AssistantChat
+        className="mb-6"
+        title="Find & inspect a vehicle with AI"
+        description='Describe what you remember in English or Roman Urdu (partial/OCR-fuzzy plate, vehicle type, colour, camera, or time) — matching vehicles and their sighting timeline update below.'
+        onSearchFilterHref={onAiFilterHref}
+      />
 
-          <div className="space-y-1.5">
-            <span className="block text-xs font-medium">Vehicle image</span>
-            {image ? (
-              <div className="relative overflow-hidden rounded-md border border-line">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={image.url} alt={`Preview of ${image.name}`} className="h-40 w-full object-cover" />
-                <Button variant="secondary" size="icon" icon={faXmark} aria-label="Remove image" onClick={clearImage} className="absolute right-2 top-2" />
-              </div>
-            ) : (
-              <label className="flex h-40 cursor-pointer flex-col items-center justify-center gap-2 rounded-md border border-dashed border-line-strong bg-subtle text-center text-sm text-muted focus-within:outline-2 focus-within:outline-accent hover:bg-accent-soft">
-                <FontAwesomeIcon icon={faUpload} />
-                <span className="font-medium text-fg">Upload a vehicle image</span>
-                <span className="text-xs">PNG or JPG</span>
-                <input type="file" accept="image/*" className="sr-only" onChange={onImageChange} />
-              </label>
-            )}
-            <p className="text-xs text-muted">Image matching is not connected. An uploaded image is only previewed; it is not used in the search.</p>
-          </div>
-
-          <div className="flex flex-wrap justify-end gap-2 lg:col-span-3">
-            <Button icon={faRotateLeft} onClick={onReset}>
-              Clear search
-            </Button>
-            <Button type="submit" variant="primary" icon={faMagnifyingGlass}>
-              Search vehicles
-            </Button>
-          </div>
-        </form>
-      </Card>
+      {filtered && (
+        <div className="mb-4 flex items-center justify-between gap-2">
+          <p className="text-xs text-muted">Showing vehicles matching the active AI filter.</p>
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={faXmark}
+            onClick={() => push(new URLSearchParams())}
+          >
+            Reset to all vehicles
+          </Button>
+        </div>
+      )}
 
       {vehicles.total === 0 ? (
         <Card>
-          <EmptyState icon={faImage} title="No vehicles found" description="Only detections with a readable plate are listed. Check the plate number, widen the time range, or choose Any camera." />
+          <EmptyState
+            icon={faCarSide}
+            title="No vehicles found"
+            description="Only detections with a readable plate are grouped here. Ask a broader question in the AI search box above or reset to view all vehicles."
+          />
         </Card>
       ) : (
         <div className={cn("grid gap-4 transition-opacity lg:grid-cols-3", pending && "opacity-60")} aria-busy={pending}>
-          <section aria-label="Search results" className="space-y-3">
+          <section aria-label="Matched vehicles" className="space-y-3">
             <h2 className="text-sm font-semibold">
               {vehicles.total} vehicle{vehicles.total === 1 ? "" : "s"} found
             </h2>
@@ -170,7 +121,15 @@ export function FindFlagView({ filters, vehicles, selected, sightings, cameraBre
                 vehicle={vehicle}
                 priority={index < 8}
                 selected={vehicle.plateNorm === selected?.plateNorm}
-                onSelect={() => push(currentParams({ sel: vehicle.plateNorm, sp: undefined, page: vehicles.page > 1 ? String(vehicles.page) : undefined }))}
+                onSelect={() =>
+                  push(
+                    currentParams({
+                      sel: vehicle.plateNorm,
+                      sp: undefined,
+                      page: vehicles.page > 1 ? String(vehicles.page) : undefined,
+                    }),
+                  )
+                }
               />
             ))}
             {vehicles.total > vehicles.pageSize && (
@@ -178,7 +137,15 @@ export function FindFlagView({ filters, vehicles, selected, sightings, cameraBre
                 page={vehicles.page}
                 pageSize={vehicles.pageSize}
                 total={vehicles.total}
-                onPageChange={(page) => push(currentParams({ page: page > 1 ? String(page) : undefined, sel: undefined, sp: undefined }))}
+                onPageChange={(page) =>
+                  push(
+                    currentParams({
+                      page: page > 1 ? String(page) : undefined,
+                      sel: undefined,
+                      sp: undefined,
+                    }),
+                  )
+                }
               />
             )}
           </section>
@@ -238,7 +205,15 @@ export function FindFlagView({ filters, vehicles, selected, sightings, cameraBre
                       page={sightings.page}
                       pageSize={sightings.pageSize}
                       total={sightings.total}
-                      onPageChange={(page) => push(currentParams({ sel: selected.plateNorm, sp: page > 1 ? String(page) : undefined, page: vehicles.page > 1 ? String(vehicles.page) : undefined }))}
+                      onPageChange={(page) =>
+                        push(
+                          currentParams({
+                            sel: selected.plateNorm,
+                            sp: page > 1 ? String(page) : undefined,
+                            page: vehicles.page > 1 ? String(vehicles.page) : undefined,
+                          }),
+                        )
+                      }
                     />
                   )}
                   <span className="sr-only">Sightings page {sightingsPage}</span>
@@ -252,7 +227,8 @@ export function FindFlagView({ filters, vehicles, selected, sightings, cameraBre
                           <div className="min-w-0">
                             <p className="truncate text-sm font-medium">{camera?.name ?? cameraId ?? "Unknown camera"}</p>
                             <p className="truncate text-xs text-muted">
-                              {camera?.location ?? "Location unavailable"} · {count} detection{count === 1 ? "" : "s"}
+                              {camera?.location && camera.location !== "Location unavailable" ? `${camera.location} · ` : ""}
+                              {count} detection{count === 1 ? "" : "s"}
                             </p>
                           </div>
                           {camera && <StatusBadge status={camera.status} />}
