@@ -2,7 +2,7 @@ import { memo } from "react";
 import { faExpand } from "@fortawesome/free-solid-svg-icons";
 import type { Camera, Detection } from "@/types";
 import { Button } from "@/components/ui/Button";
-import { StatusBadge } from "@/components/ui/StatusBadge";
+import { Badge, StatusBadge } from "@/components/ui/StatusBadge";
 import { CameraFeed } from "./CameraFeed";
 
 interface CameraCardProps {
@@ -26,8 +26,24 @@ function CameraCardComponent({ camera, detections, showOverlay, active, compact,
           <p className="truncate text-sm font-medium">{camera.name}</p>
           {!compact && <p className="truncate text-xs text-muted">{camera.location}</p>}
         </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <StatusBadge status={camera.status} />
+        <div className="flex shrink-0 items-center gap-1.5">
+          {camera.streamId ? (
+            <Badge
+              tone={
+                camera.streamState === "running"
+                  ? "success"
+                  : camera.streamState === "error"
+                    ? "danger"
+                    : "neutral"
+              }
+              dot
+            >
+              {camera.streamState ?? "stopped"}
+              {camera.streamState === "running" && camera.fps ? ` · ${camera.fps.toFixed(0)} fps` : ""}
+            </Badge>
+          ) : (
+            <StatusBadge status={camera.status} />
+          )}
           <Button variant="ghost" size="icon" icon={faExpand} aria-label={`Open ${camera.name} fullscreen`} onClick={() => onFullscreen(camera.id)} />
         </div>
       </div>

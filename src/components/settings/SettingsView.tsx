@@ -51,7 +51,7 @@ export function SettingsView({ cameras, user }: { cameras: Camera[]; user: User 
           <>
             {tab === "general" && <GeneralSettings settings={settings} update={update} />}
             {tab === "detection" && <DetectionSettings settings={settings} update={update} />}
-            {tab === "cameras" && <CameraSettings initialCameras={cameras} />}
+            {tab === "cameras" && <CameraSettings initialCameras={cameras} isAdmin={isAdmin} />}
             {tab === "notifications" && <NotificationSettings settings={settings} update={update} isAdmin={isAdmin} />}
             {tab === "profile" && <ProfileSettings user={user} />}
             {tab === "watchlist" && isAdmin && <WatchlistSettings />}

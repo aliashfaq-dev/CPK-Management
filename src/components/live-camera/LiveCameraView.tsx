@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { faListUl, faPlus, faVideoSlash, faXmark } from "@fortawesome/free-solid-svg-icons";
-import type { Camera, CameraStatus, Detection, WorkspaceTab } from "@/types";
+import type { Camera, CameraStatus, Detection, PipelineStream, WorkspaceTab } from "@/types";
 import { PlateTag } from "@/components/detections/PlateTag";
 import { VehicleThumbnail } from "@/components/detections/VehicleThumbnail";
 import { Button } from "@/components/ui/Button";
@@ -12,7 +12,6 @@ import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SearchInput } from "@/components/ui/SearchInput";
 import { Select } from "@/components/ui/Select";
-import { Toggle } from "@/components/ui/Toggle";
 import { useEscape } from "@/hooks/useEscape";
 import { useLiveDetectionSubscription } from "@/hooks/useLiveEvents";
 import { matchesCamera, sortByCameraNumber } from "@/lib/cameras";
@@ -46,9 +45,14 @@ const HOME_TAB: WorkspaceTab = { id: HOME_ID, title: "All cameras", cameraIds: [
 interface LiveCameraViewProps {
   cameras: Camera[];
   detections: Detection[];
+  pipelineConfigured?: boolean;
 }
 
-export function LiveCameraView({ cameras: initialCameras, detections: initialDetections }: LiveCameraViewProps) {
+export function LiveCameraView({
+  cameras: initialCameras,
+  detections: initialDetections,
+  pipelineConfigured = false,
+}: LiveCameraViewProps) {
   const [cameras, setCameras] = useState<Camera[]>(initialCameras);
   const [detections, setDetections] = useState<Detection[]>(initialDetections);
   const [tabs, setTabs] = useState<WorkspaceTab[]>([]);
@@ -56,13 +60,69 @@ export function LiveCameraView({ cameras: initialCameras, detections: initialDet
   const [perScreen, setPerScreen] = useState<number>(DEFAULT_PER_SCREEN);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [showOverlay, setShowOverlay] = useState(true);
   const [showRecent, setShowRecent] = useState(true);
   const [fullscreenId, setFullscreenId] = useState<string | null>(null);
   const nextTabNumber = useRef(1);
 
   useEffect(() => setCameras(initialCameras), [initialCameras]);
   useEffect(() => setDetections(initialDetections), [initialDetections]);
+
+  // Poll pipeline stream statuses every 3s while visible so running/stopped/fps badges stay current.
+  useEffect(() => {
+    if (!pipelineConfigured) return;
+    let cancelled = false;
+    const poll = async () => {
+      if (document.hidden) return;
+      try {
+        const res = await fetch("/api/pipeline/streams", { cache: "no-store" });
+        if (!res.ok || cancelled) return;
+        const body = (await res.json()) as { streams?: PipelineStream[] };
+        const streams = body.streams ?? [];
+        const byCamera = new Map(streams.map((s) => [s.camera_id, s]));
+        setCameras((current) => {
+          const seen = new Set<string>();
+          const updated = current.map((cam) => {
+            seen.add(cam.id);
+            const stream = byCamera.get(cam.id);
+            if (!stream) return { ...cam, streamId: undefined, streamState: undefined, fps: undefined, streamError: null };
+            const state = stream.status?.state ?? "stopped";
+            return {
+              ...cam,
+              streamId: stream.id,
+              streamState: state,
+              fps: stream.status?.fps ?? 0,
+              streamError: stream.status?.last_error ?? null,
+              status: state === "running" ? ("online" as const) : state === "error" ? ("warning" as const) : ("offline" as const),
+            };
+          });
+          for (const stream of streams) {
+            if (seen.has(stream.camera_id)) continue;
+            const state = stream.status?.state ?? "stopped";
+            updated.push({
+              id: stream.camera_id,
+              name: stream.name,
+              location: "Pipeline stream",
+              status: state === "running" ? "online" : state === "error" ? "warning" : "offline",
+              lastActivity: stream.status?.last_event ?? "",
+              detectionsToday: stream.status?.events ?? 0,
+              streamId: stream.id,
+              streamState: state,
+              fps: stream.status?.fps ?? 0,
+              streamError: stream.status?.last_error ?? null,
+            });
+          }
+          return updated;
+        });
+      } catch {
+        /* transient poll failure */
+      }
+    };
+    const timer = window.setInterval(() => void poll(), 3_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [pipelineConfigured]);
 
   useLiveDetectionSubscription(({ detection, isUpdate }) => {
     setDetections((current) => {
@@ -77,7 +137,6 @@ export function LiveCameraView({ cameras: initialCameras, detections: initialDet
           camera.id === detection.cameraId
             ? {
                 ...camera,
-                status: "online",
                 lastActivity: detection.detectedAt || new Date().toISOString(),
                 detectionsToday: camera.detectionsToday + 1,
               }
@@ -193,7 +252,7 @@ export function LiveCameraView({ cameras: initialCameras, detections: initialDet
             <p className="text-xs text-muted" aria-live="polite">
               {isEmptyTab ? "No cameras in this tab" : `${visible.length} of ${sourceCameras.length} cameras`}
             </p>
-            <div className="ml-auto flex flex-wrap items-center gap-3">
+            <div className="ml-auto flex flex-wrap items-center gap-2">
               {!showTabs && (
                 <Button icon={faPlus} onClick={addTab}>
                   New view
@@ -208,7 +267,6 @@ export function LiveCameraView({ cameras: initialCameras, detections: initialDet
               >
                 Recent detections
               </Button>
-              <Toggle compact label="Detection overlay" checked={showOverlay} onChange={setShowOverlay} />
             </div>
           </div>
         </Card>
@@ -242,7 +300,7 @@ export function LiveCameraView({ cameras: initialCameras, detections: initialDet
                   cameras={visible}
                   detectionsByCamera={detectionsByCamera}
                   size={fitGridSize(visible.length)}
-                  showOverlay={showOverlay}
+                  showOverlay={false}
                   active={fullscreen === undefined}
                   onFullscreen={setFullscreenId}
                 />
@@ -295,7 +353,7 @@ export function LiveCameraView({ cameras: initialCameras, detections: initialDet
         <FullscreenCameraModal
           camera={fullscreen}
           detections={detectionsByCamera.get(fullscreen.id) ?? []}
-          showOverlay={showOverlay}
+          showOverlay={false}
           onClose={closeFullscreen}
         />
       )}

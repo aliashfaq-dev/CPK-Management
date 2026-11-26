@@ -60,13 +60,46 @@ export interface Camera {
   status: CameraStatus;
   lastActivity: string;
   detectionsToday: number;
-  /** Placeholder metadata for the live-camera tiles (replaced by pipeline status in a later phase). */
   resolution?: string;
   fps?: number;
-  /** Progressive video URL used only when no pipeline is configured. */
+  /** Progressive video URL used only when PIPELINE_URL is not configured. */
   streamUrl?: string;
-  /** Pipeline stream id attached to this camera, if any. */
+  /** Pipeline stream ID attached to this camera, if any. */
   streamId?: string;
+  streamState?: StreamState;
+  streamError?: string | null;
+}
+
+export type PlateFormat = "GENERAL" | "UK" | "PAKISTAN";
+export type StreamState = "running" | "stopped" | "error";
+
+export interface PipelineStreamSource {
+  type: "file" | "rtsp";
+  file?: string;
+  url?: string;
+}
+
+export interface PipelineStreamStatus {
+  state: StreamState;
+  fps: number;
+  frames: number;
+  events: number;
+  last_event: string | null;
+  uptime_s: number;
+  restarts: number;
+  last_error: string | null;
+  rtsp_url?: string | null;
+}
+
+export interface PipelineStream {
+  id: string;
+  name: string;
+  camera_id: string;
+  loop: boolean;
+  plate_format: PlateFormat;
+  source: PipelineStreamSource;
+  publish_rtsp?: boolean;
+  status?: PipelineStreamStatus;
 }
 
 export type UserRole = "admin" | "viewer";
