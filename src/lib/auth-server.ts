@@ -63,7 +63,7 @@ interface AuthGlobals {
   __cpkBootstrapReady?: boolean;
 }
 const store = globalThis as typeof globalThis & AuthGlobals;
-const USER_CACHE_MS = 10_000;
+const USER_CACHE_MS = 30_000;
 
 export function clearUserCache(): void {
   store.__cpkUserCache?.clear();

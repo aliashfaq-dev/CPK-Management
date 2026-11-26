@@ -48,11 +48,27 @@ const COMPACT_HEADERS: Header[] = [
   { label: "Confidence", className: "text-right" },
 ];
 
-function Plate({ detection }: { detection: Detection }) {
-  return detection.hasPlate && detection.plate ? (
-    <PlateTag plate={detection.plate} />
-  ) : (
-    <span className="text-xs text-muted">No plate read</span>
+function Plate({ detection, priority, compact }: { detection: Detection; priority: boolean; compact: boolean }) {
+  return (
+    <div className="flex items-center gap-2">
+      {detection.hasPlateImage && (
+        <VehicleThumbnail
+          type={detection.vehicleType}
+          eventId={detection.id}
+          hasImage
+          kind="plate"
+          size={320}
+          priority={priority}
+          alt={detection.plate ? `Plate ${detection.plate} crop` : "Plate crop"}
+          className={compact ? "hidden h-6 w-14 xl:inline-flex" : "h-7 w-16"}
+        />
+      )}
+      {detection.hasPlate && detection.plate ? (
+        <PlateTag plate={detection.plate} />
+      ) : (
+        <span className="text-xs text-muted">No plate read</span>
+      )}
+    </div>
   );
 }
 
@@ -100,7 +116,8 @@ function DetectionTableComponent({
               </td>
             </tr>
           ) : (
-            detections.map((d) => {
+            detections.map((d, index) => {
+              const priority = index < 8;
               const hasRealLocation = Boolean(d.location && d.location !== "Location unavailable");
               return (
                 <tr
@@ -109,11 +126,17 @@ function DetectionTableComponent({
                   className={cn(onSelect && "cursor-pointer", "hover:bg-subtle", highlightIds?.has(d.id) && "bg-accent-soft")}
                 >
                   <td className={cellPad}>
-                    <VehicleThumbnail type={d.vehicleType} eventId={d.id} hasImage={d.hasVehicleImage} />
+                    <VehicleThumbnail
+                      type={d.vehicleType}
+                      eventId={d.id}
+                      hasImage={d.hasVehicleImage}
+                      size={160}
+                      priority={priority}
+                    />
                   </td>
                   {full ? (
                     <>
-                      <td className={cellPad}><Plate detection={d} /></td>
+                      <td className={cellPad}><Plate detection={d} priority={priority} compact={false} /></td>
                       <td className={cellPad}>{VEHICLE_TYPE_LABELS[d.vehicleType] ?? d.vehicleType}</td>
                       <td className={cn(cellPad, "text-muted")}>{d.cameraId}</td>
                       <td className={cn(cellPad, "max-w-48 truncate text-muted")}>{hasRealLocation ? d.location : "—"}</td>
@@ -137,7 +160,7 @@ function DetectionTableComponent({
                   ) : (
                     <>
                       <td className={cn(cellPad, "whitespace-nowrap")}>{VEHICLE_TYPE_LABELS[d.vehicleType] ?? d.vehicleType}</td>
-                      <td className={cellPad}><Plate detection={d} /></td>
+                      <td className={cellPad}><Plate detection={d} priority={priority} compact /></td>
                       <td className={cn(cellPad, "max-w-36 truncate text-muted")}>
                         <span className="block truncate text-fg">{d.cameraName}</span>
                         {hasRealLocation && <span className="block truncate text-xs text-muted">{d.location}</span>}

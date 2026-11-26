@@ -27,7 +27,7 @@ export function DetectionDetailDrawer({ detection, onClose }: DetectionDetailDra
               <span className="text-xs font-medium text-muted">Vehicle snapshot</span>
               {detection.hasVehicleImage && (
                 <a
-                  href={`/api/images/${encodeURIComponent(detection.id)}/vehicle`}
+                  href={`/api/images/${encodeURIComponent(detection.id)}/vehicle?w=0`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-1 text-xs font-medium text-accent hover:underline"
@@ -42,6 +42,7 @@ export function DetectionDetailDrawer({ detection, onClose }: DetectionDetailDra
               eventId={detection.id}
               hasImage={detection.hasVehicleImage}
               kind="vehicle"
+              size={640}
               natural
             />
           </div>
@@ -65,7 +66,7 @@ export function DetectionDetailDrawer({ detection, onClose }: DetectionDetailDra
               </div>
               {detection.hasPlateImage ? (
                 <a
-                  href={`/api/images/${encodeURIComponent(detection.id)}/plate`}
+                  href={`/api/images/${encodeURIComponent(detection.id)}/plate?w=0`}
                   target="_blank"
                   rel="noopener noreferrer"
                   title="Open full-size plate crop"
@@ -75,6 +76,8 @@ export function DetectionDetailDrawer({ detection, onClose }: DetectionDetailDra
                     eventId={detection.id}
                     hasImage
                     kind="plate"
+                    size={320}
+                    priority
                     alt={detection.plate ? `Plate ${detection.plate} crop` : "Plate crop"}
                     className="h-16 w-44 rounded-md"
                   />

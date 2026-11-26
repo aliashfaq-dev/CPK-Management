@@ -1,9 +1,12 @@
+import http from "node:http";
+import https from "node:https";
 import { DeleteObjectsCommand, GetObjectCommand, ListObjectsV2Command, S3Client } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { NodeHttpHandler } from "@smithy/node-http-handler";
 
 /**
- * Server-only S3 client. Uses `forcePathStyle: true` so both Neon Object Storage and local MinIO
- * work without DNS virtual-hosted buckets. Credentials and endpoints never leave the server.
+ * Server-only S3 client singleton with HTTP keep-alive, maxAttempts=2, and 5s connection/socket
+ * inactivity timeouts. Uses `forcePathStyle: true` for Neon Object Storage and local MinIO.
+ * Credentials and endpoints never leave the server.
  */
 
 interface S3Globals {
@@ -11,8 +14,14 @@ interface S3Globals {
 }
 const store = globalThis as typeof globalThis & S3Globals;
 
+export class S3ObjectNotFoundError extends Error {
+  constructor() {
+    super("S3 object not found.");
+  }
+}
+
 export function isS3Configured(): boolean {
-  return Boolean(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY);
+  return Boolean(process.env.AWS_ACCESS_KEY_ID?.trim() && process.env.AWS_SECRET_ACCESS_KEY?.trim());
 }
 
 export function getDefaultBucket(): string | null {
@@ -38,20 +47,50 @@ export function getS3Client(): S3Client {
     region,
     ...(endpoint ? { endpoint } : {}),
     forcePathStyle: true,
+    maxAttempts: 2,
+    requestHandler: new NodeHttpHandler({
+      httpAgent: new http.Agent({ keepAlive: true, maxSockets: 32 }),
+      httpsAgent: new https.Agent({ keepAlive: true, maxSockets: 32 }),
+      connectionTimeout: 5_000,
+      socketTimeout: 5_000,
+    }),
     credentials: { accessKeyId, secretAccessKey },
   });
   store.__cpkS3 = { signature, client };
   return client;
 }
 
-/** Builds a 5-minute presigned GET URL for an event image key. */
-export async function presignEventObjectUrl(rowBucket: string | null | undefined, key: string): Promise<string> {
+/** Downloads an event image object into memory on the server (never redirects the browser to S3). */
+export async function fetchS3ObjectBuffer(
+  rowBucket: string | null | undefined,
+  key: string,
+): Promise<Buffer> {
   const bucket = rowBucket?.trim() || getDefaultBucket();
   if (!bucket) {
     throw new Error("S3 bucket is not configured.");
   }
-  const command = new GetObjectCommand({ Bucket: bucket, Key: key });
-  return getSignedUrl(getS3Client(), command, { expiresIn: 300 });
+
+  try {
+    const output = await getS3Client().send(
+      new GetObjectCommand({ Bucket: bucket, Key: key }),
+    );
+    if (!output.Body) {
+      throw new S3ObjectNotFoundError();
+    }
+    const bytes = await output.Body.transformToByteArray();
+    return Buffer.from(bytes);
+  } catch (error) {
+    const meta = (error as { $metadata?: { httpStatusCode?: number }; name?: string }) ?? {};
+    if (
+      error instanceof S3ObjectNotFoundError ||
+      meta.name === "NoSuchKey" ||
+      meta.name === "NotFound" ||
+      meta.$metadata?.httpStatusCode === 404
+    ) {
+      throw new S3ObjectNotFoundError();
+    }
+    throw error;
+  }
 }
 
 /**

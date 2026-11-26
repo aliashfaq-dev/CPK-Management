@@ -322,9 +322,9 @@ export function LiveCameraView({
                 </p>
               ) : (
                 <ul className="divide-y divide-line overflow-y-auto">
-                  {recentForVisible.map((d) => (
+                  {recentForVisible.map((d, index) => (
                     <li key={d.id} className="flex items-center gap-3 px-4 py-2.5">
-                      <VehicleThumbnail type={d.vehicleType} eventId={d.id} hasImage={d.hasVehicleImage} />
+                      <VehicleThumbnail type={d.vehicleType} eventId={d.id} hasImage={d.hasVehicleImage} size={160} priority={index < 8} />
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center justify-between gap-2">
                           {d.hasPlate && d.plate ? (

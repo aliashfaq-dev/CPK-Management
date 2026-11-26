@@ -1,5 +1,6 @@
 import { query } from "@/lib/db";
 import { normalizePlate } from "@/lib/detection-query";
+import { primeEventImageKeys } from "@/lib/image-cache";
 import { MAX_PAGE_SIZE, VEHICLE_TYPES } from "@/lib/constants";
 import type {
   AnalyticsData,
@@ -58,14 +59,21 @@ const SORT_COLUMNS: Record<DetectionSortKey, string> = {
 
 const DETECTION_COLUMNS = `
   v.event_id, v.event_time, v.camera_id, v.number_plate, v.number_plate_confidence,
-  v.plate_detection_confidence, v.vehicle_type, v.has_plate, v.plate_key, v.vehicle_key,
+  v.plate_detection_confidence, v.vehicle_type, v.has_plate, v.plate_key, v.vehicle_key, v.s3_bucket,
   v.analysis_status, v.make, v.model, v.colour,
   c.name AS camera_name, c.location AS camera_location`;
 
 export function rowToDetection(row: Row): Detection {
+  const id = String(row.event_id);
+  primeEventImageKeys(
+    id,
+    typeof row.s3_bucket === "string" ? row.s3_bucket : null,
+    typeof row.vehicle_key === "string" ? row.vehicle_key : null,
+    typeof row.plate_key === "string" ? row.plate_key : null,
+  );
   const makeModel = [row.make, row.model].filter((part) => typeof part === "string" && part.trim()).join(" ");
   return {
-    id: String(row.event_id),
+    id,
     plate: row.has_plate ? String(row.number_plate ?? "") : "",
     hasPlate: Boolean(row.has_plate),
     vehicleType: row.vehicle_type as VehicleType,

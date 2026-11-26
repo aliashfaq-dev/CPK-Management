@@ -164,10 +164,11 @@ export function FindFlagView({ filters, vehicles, selected, sightings, cameraBre
             <h2 className="text-sm font-semibold">
               {vehicles.total} vehicle{vehicles.total === 1 ? "" : "s"} found
             </h2>
-            {vehicles.rows.map((vehicle) => (
+            {vehicles.rows.map((vehicle, index) => (
               <VehicleCard
                 key={vehicle.plateNorm}
                 vehicle={vehicle}
+                priority={index < 8}
                 selected={vehicle.plateNorm === selected?.plateNorm}
                 onSelect={() => push(currentParams({ sel: vehicle.plateNorm, sp: undefined, page: vehicles.page > 1 ? String(vehicles.page) : undefined }))}
               />
@@ -193,6 +194,7 @@ export function FindFlagView({ filters, vehicles, selected, sightings, cameraBre
                       eventId={selected.latestEventId}
                       hasImage={selected.hasVehicleImage}
                       kind="vehicle"
+                      size={640}
                       natural
                     />
                   </div>
@@ -203,6 +205,7 @@ export function FindFlagView({ filters, vehicles, selected, sightings, cameraBre
                       eventId={selected.latestEventId}
                       hasImage={selected.hasPlateImage}
                       kind="plate"
+                      size={320}
                       natural
                       alt={`Plate ${selected.plate} snapshot`}
                     />

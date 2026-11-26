@@ -2,6 +2,7 @@ import { Client } from "pg";
 import { evaluateAlertForDetection } from "@/lib/alerts";
 import { getDetectionById } from "@/lib/data-service";
 import { pgConfigFromUrl } from "@/lib/db";
+import { warmEventThumbnails } from "@/lib/image-cache";
 import type { Detection, LiveAlertPayload } from "@/types";
 
 /**
@@ -85,6 +86,7 @@ async function handleNotification(hub: LiveHubState, rawPayload: string | undefi
     emit(hub, { kind: "detection", eventId: detection.id, payload: withOp });
 
     if (op === "insert") {
+      warmEventThumbnails(detection.id);
       const alert = await evaluateAlertForDetection(detection);
       if (alert) {
         emit(hub, { kind: "alert", eventId: detection.id, payload: alert });

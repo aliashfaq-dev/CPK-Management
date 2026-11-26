@@ -7,10 +7,11 @@ import { cn, formatDateTime, vehicleDescription } from "@/lib/utils";
 interface VehicleCardProps {
   vehicle: Vehicle;
   selected: boolean;
+  priority?: boolean;
   onSelect: () => void;
 }
 
-function VehicleCardComponent({ vehicle, selected, onSelect }: VehicleCardProps) {
+function VehicleCardComponent({ vehicle, selected, priority = false, onSelect }: VehicleCardProps) {
   const matches = vehicle.totalSightings;
   return (
     <button
@@ -27,6 +28,8 @@ function VehicleCardComponent({ vehicle, selected, onSelect }: VehicleCardProps)
         eventId={vehicle.latestEventId}
         hasImage={vehicle.hasVehicleImage}
         kind="vehicle"
+        size={160}
+        priority={priority}
         className="h-12 w-16"
       />
       <span className="min-w-0 flex-1">
@@ -43,8 +46,10 @@ function VehicleCardComponent({ vehicle, selected, onSelect }: VehicleCardProps)
           eventId={vehicle.latestEventId}
           hasImage
           kind="plate"
+          size={320}
+          priority={priority}
           alt={`Plate ${vehicle.plate} crop`}
-          className="hidden h-9 w-20 sm:flex"
+          className="hidden h-9 w-20 sm:inline-flex"
         />
       )}
     </button>
